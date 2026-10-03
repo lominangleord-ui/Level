@@ -22,7 +22,7 @@ import { Notifications } from "./components/Notifications";
 import { LevelUpFx, RankUpFx, ShadowFx } from "./components/Fx";
 import { CameraOverlay } from "./components/CameraOverlay";
 import { loadDetector } from "./lib/pose";
-import { checkDailyReminder } from "./lib/reminders";
+import { checkDailyReminder, reconcileReminderTimestamp, syncReminderSnapshot } from "./lib/reminders";
 import { REMINDER_POLL_MS } from "./lib/reminderPolicy";
 
 const TABS = [
@@ -215,6 +215,26 @@ export default function App() {
 
   useEffect(() => {
     if (screen !== "main") return;
+    void reconcileReminderTimestamp().then(() => checkDailyReminder("in-app"));
+    void syncReminderSnapshot();
+    const unsubscribe = useGame.subscribe((state, previous) => {
+      if (state.settings.remindersEnabled !== previous.settings.remindersEnabled
+        || state.name !== previous.name
+        || state.dailyCompleted !== previous.dailyCompleted
+        || state.questDate !== previous.questDate
+        || state.dead !== previous.dead
+        || state.inLockdown !== previous.inLockdown
+        || state.penalty !== previous.penalty
+        || state.lastReminderCheck !== previous.lastReminderCheck) {
+        void syncReminderSnapshot();
+      }
+    });
+    const onWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === "reminder-delivered" && typeof event.data.lastReminderCheck === "number") {
+        useGame.setState((state) => ({ lastReminderCheck: Math.max(state.lastReminderCheck, event.data.lastReminderCheck) }));
+      }
+    };
+    navigator.serviceWorker?.addEventListener("message", onWorkerMessage);
     const id = setInterval(() => {
       if (!document.hidden) useGame.getState().tick();
     }, 1000);
@@ -235,6 +255,8 @@ export default function App() {
     return () => {
       clearInterval(id);
       clearInterval(poll);
+      unsubscribe();
+      navigator.serviceWorker?.removeEventListener("message", onWorkerMessage);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onVisibility);
       document.documentElement.classList.remove("app-backgrounded");

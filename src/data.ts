@@ -114,11 +114,12 @@ export const SHOP_ITEMS: Consumable[] = [
 
 export function rollLoot(ownedThemeIds: number[], random = Math.random): LootRoll {
   const unownedThemes = [13, 14].filter((id) => !ownedThemeIds.includes(id));
+  // Tokens should be exceptional: a 5% roll, never a free spawn bonus.
+  if (random() < 0.05) return { kind: "token", amount: 1 };
   const options: LootRoll[] = [
     { kind: "potions", amount: 2 },
-    { kind: "token", amount: 1 },
     { kind: "gold", amount: 60 },
-    ...(unownedThemes.length ? [{ kind: "theme" as const, themeId: unownedThemes[0] }] : []),
+    ...(unownedThemes.length ? [{ kind: "theme" as const, themeId: unownedThemes[Math.floor(random() * unownedThemes.length)] }] : []),
   ];
   return options[Math.min(options.length - 1, Math.floor(random() * options.length))];
 }

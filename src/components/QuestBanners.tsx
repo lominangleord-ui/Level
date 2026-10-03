@@ -19,7 +19,7 @@ export function SpecialQuestBanner() {
       <div className="text-[12px] text-[color:var(--text)] mt-1 leading-snug">{quest.desc}</div>
       <div className="font-mono text-[10.5px] text-[color:var(--gold)] mt-2">
         REWARD · +{quest.xp} XP
-        {quest.stat ? ` · +${quest.statAmt} ${quest.stat.toUpperCase()}` : ""} · TOKEN ALREADY GRANTED
+        {quest.stat ? ` · +${quest.statAmt} ${quest.stat.toUpperCase()}` : ""} · 5% TOKEN DROP ON CLEAR
       </div>
       <div className="flex gap-2 mt-3">
         <button className="sl-btn sl-btn-gold flex-1 py-2" onClick={complete}>

@@ -238,10 +238,10 @@ export function normalizeSave(input: unknown): GameState {
   fresh.notifiedTitles = fresh.notifiedTitles.filter((id) => TITLES.some((title) => title.id === id));
   const urgent = saved.urgentQuest as { id?: number } | null;
   fresh.urgentQuest = URGENT_QUESTS.find((quest) => quest.id === urgent?.id) ?? null;
-  fresh.urgentActive = fresh.urgentActive && fresh.urgentQuest !== null;
+  fresh.urgentActive = fresh.dailyCompleted && fresh.urgentActive && fresh.urgentQuest !== null;
   const special = saved.specialQuest as { id?: number } | null;
   fresh.specialQuest = SPECIAL_QUESTS.find((quest) => quest.id === special?.id) ?? null;
-  fresh.specialActive = fresh.specialActive && fresh.specialQuest !== null;
+  fresh.specialActive = fresh.dailyCompleted && fresh.specialActive && fresh.specialQuest !== null;
   if (saved.pact && typeof saved.pact === "object" && !Array.isArray(saved.pact)) {
     const pact = saved.pact as Record<string, unknown>;
     const validStake = ["witness", "forfeit", "ironvow"].includes(String(pact.stake));
@@ -685,8 +685,9 @@ export const useGame = create<Store>()(
 
         completeSpecial: () => {
           const s = get();
-          if (!s.specialQuest || !s.specialActive || s.dead || s.inLockdown) return;
+          if (!s.specialQuest || !s.specialActive || !s.dailyCompleted || s.dead || s.inLockdown) return;
           const q = s.specialQuest;
+          const tokenDrop = Math.random() < 0.05;
           set((st) => {
             const draft = { ...st };
             const fx = awardXP(draft, q.xp);
@@ -702,6 +703,7 @@ export const useGame = create<Store>()(
             }
             draft.specialActive = false;
             draft.specialQuest = null;
+            if (tokenDrop) draft.relapseTokens += 1;
             if (fx.leveled) {
               draft.levelUpFx = true as any;
               if (fx.rankChanged) draft.rankUpFx = fx.newRank as any;
@@ -710,13 +712,20 @@ export const useGame = create<Store>()(
             return draft;
           });
           audio.questComplete(); // The level-up overlay owns its fanfare, once.
+          get().notify({
+            title: "Special Quest Cleared",
+            message: tokenDrop
+              ? `${q.name} complete. <b>Rare drop: +1 Relapse Token.</b>`
+              : `${q.name} complete. +${q.xp} XP${q.stat ? ` · +${q.statAmt} ${q.stat.toUpperCase()}` : ""}.`,
+            type: "System",
+          });
         },
 
         dismissSpecial: () => set({ specialActive: false, specialQuest: null }),
 
         completeUrgent: (reps) => {
           const s = get();
-          if (!s.urgentQuest || !s.urgentActive || s.dead || s.inLockdown || s.urgentEnd <= Date.now()) return;
+          if (!s.dailyCompleted || !s.urgentQuest || !s.urgentActive || s.dead || s.inLockdown || s.urgentEnd <= Date.now()) return;
           const q = s.urgentQuest;
           if (reps < q.target) return;
           const loot = rollLoot(s.inventory);
@@ -1070,23 +1079,22 @@ function runTick(set: (fn: any) => void, get: () => Store) {
   }
 
   // ---- Random spawns (not during lockdown) ----
-  if (!s.inLockdown && !s.dead && (typeof document === "undefined" || !document.hidden)) {
-    // Special quest: 20% per tick (but throttle so it's not every second)
-    if (!s.specialActive && !s.urgentActive && Math.random() < 0.02) {
+  if (s.dailyCompleted && !s.inLockdown && !s.dead && (typeof document === "undefined" || !document.hidden)) {
+    // Side quests unlock only after the daily work is done. One event per tick.
+    const current = get();
+    const spawnRoll = Math.random();
+    if (!current.specialActive && !current.urgentActive && spawnRoll < 0.02) {
       const q = SPECIAL_QUESTS[Math.floor(Math.random() * SPECIAL_QUESTS.length)];
-      set((st: Store) => ({
+      set({
         specialActive: true,
         specialQuest: q,
-        relapseTokens: st.relapseTokens + 1,
-      }));
+      });
       get().notify({
         title: "Special Quest",
-        message: `⚡ <b>${q.name}</b><br/>${q.desc}<br/>+1 Relapse Token granted.`,
+        message: `⚡ <b>${q.name}</b><br/>${q.desc}<br/>Rare Relapse Token drop: 5% on completion.`,
         type: "Emergency",
       });
-    }
-    // Urgent gate quest: independent ~20% roll (throttled)
-    if (!s.urgentActive && !s.specialActive && Math.random() < 0.012) {
+    } else if (!current.specialActive && !current.urgentActive && spawnRoll < 0.032) {
       const q = URGENT_QUESTS[Math.floor(Math.random() * URGENT_QUESTS.length)];
       set({ urgentActive: true, urgentQuest: q, urgentEnd: Date.now() + URGENT_MS });
       audio.rankUp();
@@ -1115,6 +1123,11 @@ function applyNewDay(set: (fn: any) => void, get: () => Store, today: string) {
     runDone: false,
     dailyCompleted: false,
     dailyTargetLevel: null,
+    specialActive: false,
+    specialQuest: null,
+    urgentActive: false,
+    urgentQuest: null,
+    urgentEnd: 0,
     dayMode,
   });
 }

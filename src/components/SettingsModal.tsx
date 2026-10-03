@@ -5,7 +5,7 @@ import { useUi } from "../store/ui";
 import { SystemWindow } from "./SystemWindow";
 import { download, SAVE_KEY } from "../lib/utils";
 import { voice } from "../lib/audio";
-import { enableRemindersFromGesture, notificationsSupported, sendReminderTest } from "../lib/reminders";
+import { disableBackgroundReminders, enableRemindersFromGesture, notificationsSupported, sendReminderTest } from "../lib/reminders";
 
 function Toggle({
   on,
@@ -134,16 +134,19 @@ export function SettingsModal() {
             <Toggle
               on={s.settings.remindersEnabled}
               onClick={() => {
-                if (s.settings.remindersEnabled) s.setRemindersEnabled(false);
+                if (s.settings.remindersEnabled) {
+                  s.setRemindersEnabled(false);
+                  void disableBackgroundReminders();
+                }
                 else void enableRemindersFromGesture();
               }}
               label="Enable Reminders"
-              desc="System notifications for incomplete dailies every six hours while this tab remains open. Requires your permission."
+              desc="System notifications for incomplete dailies. Requires permission; open-tab checks work everywhere, closed-app checks are best-effort on some installed PWAs."
             />
           </div>
 
           <div className="mt-3 text-[12px] leading-relaxed text-[color:var(--text-mid)]">
-            Reopen reminders always work after six hours, without setup. Browser notifications cannot be scheduled after the app is fully closed; sleeping tabs can delay them. On iOS, system notifications require a supported Home Screen app.
+            Reopen reminders work across browsers. Installed Chromium PWAs may receive best-effort checks while closed, but the browser controls timing and may delay or skip them; exact six-hour delivery after closing the app requires a push server, which this app does not use. iOS requires a supported Home Screen app.
           </div>
           {s.settings.remindersEnabled && <div className="mt-2">
             <div className="font-mono text-[10px] text-[color:var(--text)] mb-2">

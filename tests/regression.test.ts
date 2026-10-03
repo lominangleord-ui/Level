@@ -78,13 +78,60 @@ test("Inventory is cosmetic only, shop is recovery only, and legacy equipment di
 });
 
 test("Both themes are reachable from shared loot without duplicate theme rolls", () => {
-  assert.deepEqual(rollLoot([100], () => 0.99), { kind: "theme", themeId: 13 });
+  assert.deepEqual(rollLoot([100], () => 0.99), { kind: "theme", themeId: 14 });
   assert.deepEqual(rollLoot([100, 13], () => 0.99), { kind: "theme", themeId: 14 });
   assert.deepEqual(rollLoot([100, 13, 14], () => 0.99), { kind: "gold", amount: 60 });
+  assert.deepEqual(rollLoot([100], () => 0.04), { kind: "token", amount: 1 });
   const state = fresh();
   const reward = resolveLoot(state, { kind: "potions", amount: 2 });
   assert.equal(reward.patch.potions, 2);
   assert.match(reward.message, /Recovery Potions/);
+});
+
+test("Side quests cannot spawn before the daily clear and never grant a token on spawn", () => {
+  reset({ screen: "main", dailyCompleted: false, questDate: todayISO(), dailyDate: todayISO() });
+  for (let i = 0; i < 250; i++) useGame.getState().tick();
+  assert.equal(useGame.getState().specialActive, false);
+  assert.equal(useGame.getState().urgentActive, false);
+  assert.equal(useGame.getState().relapseTokens, 0);
+});
+
+test("Only a completed daily can spawn one side quest at a time", () => {
+  const originalRandom = Math.random;
+  try {
+    Math.random = () => 0.01;
+    reset({ screen: "main", dailyCompleted: true, questDate: todayISO(), dailyDate: todayISO() });
+    useGame.getState().tick();
+    assert.equal(useGame.getState().specialActive, true);
+    assert.equal(useGame.getState().urgentActive, false);
+    assert.equal(useGame.getState().relapseTokens, 0);
+
+    Math.random = () => 0.025;
+    reset({ screen: "main", dailyCompleted: true, questDate: todayISO(), dailyDate: todayISO() });
+    useGame.getState().tick();
+    assert.equal(useGame.getState().specialActive, false);
+    assert.equal(useGame.getState().urgentActive, true);
+    assert.equal(useGame.getState().relapseTokens, 0);
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test("Special quests award relapse tokens only at a 5% successful-clear roll", () => {
+  const originalRandom = Math.random;
+  try {
+    Math.random = () => 0.049;
+    reset({ dailyCompleted: true, specialActive: true, specialQuest: { id: 2, name: "Set", desc: "Set", xp: 1 } });
+    useGame.getState().completeSpecial();
+    assert.equal(useGame.getState().relapseTokens, 1);
+
+    Math.random = () => 0.051;
+    reset({ dailyCompleted: true, specialActive: true, specialQuest: { id: 2, name: "Set", desc: "Set", xp: 1 } });
+    useGame.getState().completeSpecial();
+    assert.equal(useGame.getState().relapseTokens, 0);
+  } finally {
+    Math.random = originalRandom;
+  }
 });
 
 test("XP has no item, potion, theme or Igris multiplier", () => {

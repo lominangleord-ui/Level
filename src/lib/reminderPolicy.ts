@@ -2,6 +2,7 @@ import { getMsUntilMidnight } from "./utils";
 
 export const REMINDER_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export const REMINDER_POLL_MS = 15 * 60 * 1000;
+export const REMINDER_SYNC_TAG = "the-system-daily-reminder";
 
 export function isReminderDue(state: {
   name: string;
