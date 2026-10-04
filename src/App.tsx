@@ -8,7 +8,7 @@ import { Starfield } from "./components/Starfield";
 import { Intro, Awaken } from "./components/Onboarding";
 import { StatusPanel, ProfileWindow } from "./components/StatusPanel";
 import { DailyQuest } from "./components/DailyQuest";
-import { SpecialQuestBanner, UrgentQuestBanner } from "./components/QuestBanners";
+import { SpecialQuestBanner } from "./components/QuestBanners";
 import { TitlesTab } from "./components/TitlesTab";
 import { BloodPactWindow, PactLedger } from "./components/BloodPact";
 import { LogTab } from "./components/LogTab";
@@ -19,15 +19,19 @@ import { InventoryModal } from "./components/InventoryModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { AvatarPicker } from "./components/AvatarPicker";
 import { Notifications } from "./components/Notifications";
-import { LevelUpFx, RankUpFx, ShadowFx } from "./components/Fx";
+import { GateClearFx, LevelUpFx, RankUpFx } from "./components/Fx";
 import { CameraOverlay } from "./components/CameraOverlay";
+import { JobChange } from "./components/JobChange";
+import { PathPreview, PathScreen } from "./components/PathScreen";
+import { getPath } from "./data/monarchPaths";
 import { loadDetector } from "./lib/pose";
 import { checkDailyReminder, reconcileReminderTimestamp, syncReminderSnapshot } from "./lib/reminders";
 import { REMINDER_POLL_MS } from "./lib/reminderPolicy";
 
 const TABS = [
   { id: "quest", label: "QUEST", icon: "⚔" },
-  { id: "titles", label: "TITLES", icon: "♛" },
+  { id: "path", label: "PATH", icon: "♛" },
+  { id: "titles", label: "TITLES", icon: "◇" },
   { id: "pact", label: "PACT", icon: "🩸" },
   { id: "log", label: "LOG", icon: "▤" },
 ] as const;
@@ -60,11 +64,12 @@ function TopBar() {
 function BottomNav() {
   const tab = useGame((s) => s.tab);
   const setTab = useGame((s) => s.setTab);
+  const pathChosen = useGame((s) => s.monarchPath !== null);
 
   return (
     <nav className="bottom-nav">
       <div className="flex items-stretch">
-        {TABS.map((t) => (
+        {TABS.filter((t) => t.id !== "path" || pathChosen).map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -110,12 +115,14 @@ function MainApp() {
             <StatusPanel />
           </div>
           <div className="flex flex-col gap-4">
-            <UrgentQuestBanner />
             <SpecialQuestBanner />
+            <PathPreview />
             <DailyQuest />
           </div>
         </div>
       )}
+
+      {tab === "path" && <div className="max-w-[860px] mx-auto"><PathScreen /></div>}
 
       {tab === "titles" && (
         <div className="max-w-[760px] mx-auto">
@@ -145,7 +152,9 @@ function MainApp() {
 function GlobalOverlays() {
   const s = useGame(useShallow((state) => ({
     screen: state.screen,
-    dead: state.dead, shadowFx: state.shadowFx,
+    dead: state.dead,
+    gateClearFx: state.gateClearFx,
+    jobChange: state.level >= 40 && !state.monarchPath && !state.inLockdown,
     levelUpFx: state.levelUpFx, rankUpFx: state.rankUpFx,
     hasNotification: state.notifications.length > 0,
     hasReward: state.rewardChoicePending && !state.inLockdown,
@@ -154,7 +163,7 @@ function GlobalOverlays() {
     camera: state.camExercise !== null,
     avatar: state.avatarOpen, inventory: state.inventoryOpen, settings: state.settingsOpen,
   })));
-  const active = s.screen === "main" && (s.dead || !!s.shadowFx || s.levelUpFx || !!s.rankUpFx || s.hasNotification || s.hasReward
+  const active = s.screen === "main" && (s.dead || s.jobChange || !!s.gateClearFx || s.levelUpFx || !!s.rankUpFx || s.hasNotification || s.hasReward
     || ui.camera || ui.avatar || ui.inventory || ui.settings);
 
   useEffect(() => {
@@ -167,7 +176,8 @@ function GlobalOverlays() {
   if (s.screen !== "main") return null;
   if (s.dead) return <Death />;
   if (ui.camera) return <CameraOverlay />;
-  if (s.shadowFx) return <ShadowFx />;
+  if (s.jobChange) return <JobChange />;
+  if (s.gateClearFx) return <GateClearFx />;
   if (s.levelUpFx) return <LevelUpFx />;
   if (s.rankUpFx) return <RankUpFx />;
   if (s.hasNotification) return <Notifications />;
@@ -181,9 +191,11 @@ function GlobalOverlays() {
 export default function App() {
   const screen = useGame((s) => s.screen);
   const hudTheme = useGame((s) => s.hudTheme);
+  const monarchPath = useGame((s) => s.monarchPath);
+  const equippedFlourishId = useGame((s) => s.equippedFlourishId);
   const inLockdown = useGame((s) => s.inLockdown);
   const dead = useGame((s) => s.dead);
-  const gameOverlay = useGame((s) => s.dead || !!s.shadowFx || s.levelUpFx || !!s.rankUpFx
+  const gameOverlay = useGame((s) => s.dead || (s.level >= 40 && !s.monarchPath && !s.inLockdown) || !!s.gateClearFx || s.levelUpFx || !!s.rankUpFx
     || s.notifications.length > 0 || (s.rewardChoicePending && !s.inLockdown));
   const uiOverlay = useUi((s) => s.camExercise !== null || s.inventoryOpen || s.settingsOpen || s.avatarOpen);
 
@@ -211,7 +223,12 @@ export default function App() {
       if (name.startsWith("theme-")) classes.remove(name);
     }
     classes.add(`theme-${inLockdown ? "penalty-red" : hudTheme}`);
-  }, [hudTheme, inLockdown]);
+    const path = getPath(monarchPath);
+    classes.toggle("job-changed", !!path && !inLockdown);
+    classes.toggle("sigil-active", !!path && equippedFlourishId !== null && !inLockdown);
+    if (path) document.documentElement.style.setProperty("--path-accent", path.color);
+    else document.documentElement.style.removeProperty("--path-accent");
+  }, [hudTheme, inLockdown, monarchPath, equippedFlourishId]);
 
   useEffect(() => {
     if (screen !== "main") return;

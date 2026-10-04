@@ -1,15 +1,14 @@
 import type {
   Item,
-  Consumable,
+  ShopItem,
   LootRoll,
   TitleDef,
-  ShadowDef,
   SpecialQuest,
-  UrgentQuest,
   ArchetypeId,
   ExerciseKey,
   PenaltyTargets,
 } from "./types";
+import { MONARCH_PATHS, PATH_FLOURISH_IDS } from "./data/monarchPaths";
 
 export const STARTER_THEME_ID = 100;
 
@@ -105,21 +104,36 @@ export const ITEMS: Item[] = [
   { id: STARTER_THEME_ID, name: "System Blue HUD", icon: "🔷", desc: "Default interface theme.", theme: "system-blue", pool: "starter" },
   { id: 13, name: "Shadow Purple HUD", icon: "🟣", desc: "Unlocks the Shadow Purple theme. Cosmetic only.", theme: "shadow-purple", pool: "cosmetic" },
   { id: 14, name: "Monarch Gold HUD", icon: "🟡", desc: "Unlocks the Monarch Gold theme. Cosmetic only.", theme: "monarch-gold", pool: "cosmetic" },
+  ...MONARCH_PATHS.map((path, index): Item => ({
+    id: 200 + index,
+    name: `${path.name} Sigil`,
+    icon: path.icon,
+    desc: `Cosmetic ${path.name} flourish. Personalized only after Job Change.`,
+    pathFlourish: path.id,
+    pool: "flourish",
+  })),
 ];
 
-export const SHOP_ITEMS: Consumable[] = [
+export const SHOP_ITEMS: ShopItem[] = [
   { id: 31, name: "Recovery Potion", icon: "🧪", desc: "Fully restores HP and MP.", cost: 40, kind: "recovery" },
   { id: 30, name: "Stamina Draft", icon: "🧪", desc: "Clears 40 fatigue points. No XP bonus.", cost: 30, kind: "stamina" },
+  { id: 32, name: "Elixir of Vitality", icon: "✦", desc: "Restores HP/MP and clears all fatigue.", cost: 90, kind: "elixir" },
+  { id: 33, name: "Relapse Token", icon: "◇", desc: "A rare way to escape Lockdown. No XP bonus.", cost: 150, kind: "token" },
+  { id: 34, name: "Path Sigil", icon: "✧", desc: "Cosmetic finish for your chosen Monarch path. Job Change required.", cost: 60, kind: "sigil" },
 ];
 
-export function rollLoot(ownedThemeIds: number[], random = Math.random): LootRoll {
+export function rollLoot(ownedThemeIds: number[], ownedFlourishIds: number[] = ownedThemeIds, random = Math.random): LootRoll {
   const unownedThemes = [13, 14].filter((id) => !ownedThemeIds.includes(id));
+  const unownedFlourishes = PATH_FLOURISH_IDS.filter((id) => !ownedFlourishIds.includes(id));
   // Tokens should be exceptional: a 5% roll, never a free spawn bonus.
   if (random() < 0.05) return { kind: "token", amount: 1 };
   const options: LootRoll[] = [
     { kind: "potions", amount: 2 },
     { kind: "gold", amount: 60 },
+    { kind: "gold", amount: 60 },
+    { kind: "gold", amount: 120 },
     ...(unownedThemes.length ? [{ kind: "theme" as const, themeId: unownedThemes[Math.floor(random() * unownedThemes.length)] }] : []),
+    ...(unownedFlourishes.length ? [{ kind: "flourish" as const, flourishId: unownedFlourishes[Math.floor(random() * unownedFlourishes.length)] }] : []),
   ];
   return options[Math.min(options.length - 1, Math.floor(random() * options.length))];
 }
@@ -182,14 +196,7 @@ export const TITLES: TitleDef[] = [
   { id: 6, name: "C-Rank Hunter", icon: "⚔️", desc: "Reach Level 20.", level: 20 },
   { id: 7, name: "Shadow of Discipline", icon: "🌑", desc: "Maintain a 30-day streak.", streak: 30 },
   { id: 8, name: "Elite Hunter", icon: "👑", desc: "Reach Level 30.", level: 30 },
-  { id: 9, name: "Monarch", icon: "🩸", desc: "Reach Level 50.", level: 50 },
-];
-
-/** Shadow soldiers [NEW ADDITION B.3] */
-export const SHADOWS: ShadowDef[] = [
-  { id: "igris", name: "Igris", icon: "⚔️", effect: "The loyal shadow knight. Cosmetic companion; no XP bonus." },
-  { id: "iron", name: "Iron", icon: "🛡️", effect: "+3% gold from all sources" },
-  { id: "tank", name: "Tank", icon: "🐗", effect: "Fatigue accumulates 5% slower" },
+  { id: 9, name: "National-Level Hunter", icon: "🩸", desc: "Reach Level 50.", level: 50 },
 ];
 
 /** Special quests — 5 pool [VERIFIED FROM SOURCE A.8] */
@@ -201,23 +208,19 @@ export const SPECIAL_QUESTS: SpecialQuest[] = [
   { id: 5, name: "Vitality Surge: Full Body", desc: "The System rewards initiative.", xp: 350, stat: "vit", statAmt: 1 },
 ];
 
-/** Every gate rolls the same recovery/cosmetic loot table. */
-export const URGENT_QUESTS: UrgentQuest[] = [
-  { id: 1, name: "Red Gate: Assassin", desc: "Eliminate the target: 30 Push-ups in 60s.", exercise: "push", target: 30, xp: 400, gold: 150 },
-  { id: 2, name: "Mana Distortion", desc: "Stabilize the rift: 40 Sit-ups in 60s.", exercise: "sit", target: 40, xp: 450, gold: 180 },
-  { id: 3, name: "Dungeon Break", desc: "Seal the gate: 35 Squats in 60s.", exercise: "squat", target: 35, xp: 420, gold: 160 },
-  { id: 4, name: "Shadow Rift", desc: "Contain the breach: 45 Push-ups in 60s.", exercise: "push", target: 45, xp: 500, gold: 200 },
-  { id: 5, name: "Monarch's Trial", desc: "Prove your worth: 50 Squats in 60s.", exercise: "squat", target: 50, xp: 550, gold: 220 },
-];
+/** Public Association grades; the level boundary is a game-balance approximation. */
+export const RANKS = [
+  { id: "E", name: "E-Rank", min: 1, max: 9, color: "#aaaaaa" },
+  { id: "D", name: "D-Rank", min: 10, max: 19, color: "#38d98a" },
+  { id: "C", name: "C-Rank", min: 20, max: 29, color: "#9b59f7" },
+  { id: "B", name: "B-Rank", min: 30, max: 34, color: "#aa44ff" },
+  { id: "A", name: "A-Rank", min: 35, max: 39, color: "#ffaa00" },
+] as const;
 
-/** Rank derivation [VERIFIED FROM SOURCE A.3] */
-export function rankFromLevel(level: number): { rank: string; color: string } {
-  if (level >= 50) return { rank: "S", color: "#cc1a30" };
-  if (level >= 40) return { rank: "A", color: "#ffaa00" };
-  if (level >= 30) return { rank: "B", color: "#aa44ff" };
-  if (level >= 20) return { rank: "C", color: "#9b59f7" };
-  if (level >= 10) return { rank: "D", color: "#38d98a" };
-  return { rank: "E", color: "#aaaaaa" };
+export function rankFromLevel(level: number): { id: string; name: string; color: string } {
+  if (level >= 40) return { id: "S", name: "S-Rank · National-Level", color: "#cc1a30" };
+  const rank = RANKS.find((entry) => level >= entry.min && level <= entry.max) ?? RANKS[0];
+  return { id: rank.id, name: rank.name, color: rank.color };
 }
 
 /** Deliberate, more forgiving ranges: a rep still needs both ends of the motion. */

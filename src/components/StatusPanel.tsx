@@ -1,6 +1,8 @@
 import { useShallow } from "zustand/react/shallow";
 import { useGame } from "../store/game";
 import { rankFromLevel, TITLES, ARCHETYPES } from "../data";
+import { getPath, getTier } from "../data/monarchPaths";
+import { pathTitle } from "../lib/monarch";
 import { SystemWindow, DataRow } from "./SystemWindow";
 import { Bar, CountUp } from "./common";
 import { useUi } from "../store/ui";
@@ -26,11 +28,6 @@ const Glyph = {
   pwr: (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
       <path d="m12 2 3 6 6 1-4.5 4.3 1.1 6.2L12 16.6 6.4 19.5 7.5 13.3 3 9l6-1 3-6Z" />
-    </svg>
-  ),
-  shd: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
-      <path d="M12 2 4 5.5v6c0 5 3.4 9.2 8 10.5 4.6-1.3 8-5.5 8-10.5v-6L12 2Z" />
     </svg>
   ),
   ftg: (
@@ -93,13 +90,20 @@ export function ProfileWindow() {
   const s = useGame(useShallow((state) => ({
     name: state.name, avatar: state.avatar, level: state.level,
     archetype: state.archetype, equippedTitle: state.equippedTitle,
+    monarchPath: state.monarchPath, clearedGates: state.clearedGates,
     hp: state.hp, hpMax: state.hpMax, streak: state.streak, pact: state.pact,
     gold: state.gold, potions: state.potions, relapseTokens: state.relapseTokens,
-    shadows: state.shadows,
+    staminaDrafts: state.staminaDrafts,
   })));
   const openAvatar = useUi((u) => u.openAvatar);
-  const { rank, color } = rankFromLevel(s.level);
-  const title = s.equippedTitle ? TITLES.find((t) => t.id === s.equippedTitle) : null;
+  const { id: rank, name: rankName, color } = rankFromLevel(s.level);
+  const path = getPath(s.monarchPath);
+  const pathTitleParts = typeof s.equippedTitle === "string" ? s.equippedTitle.split(":") : [];
+  const title = typeof s.equippedTitle === "number"
+    ? TITLES.find((t) => t.id === s.equippedTitle)
+    : path && pathTitleParts[1] === path.id && s.clearedGates.includes(Number(pathTitleParts[2]) as 1 | 2 | 3 | 4 | 5)
+      ? pathTitle(path.id, Number(pathTitleParts[2]) as 1 | 2 | 3 | 4 | 5)
+      : null;
   const arch = ARCHETYPES[s.archetype];
   const status = hpStatus(s.hp, s.hpMax);
 
@@ -138,8 +142,10 @@ export function ProfileWindow() {
             </div>
           )}
           <div className="mt-2 space-y-0">
-            <DataRow k="Class" v={<span style={{ color }}>{rank}-Rank</span>} />
+            <DataRow k="Class" v={<span style={{ color }}>{rankName}</span>} />
             <DataRow k="Archetype" v={`${arch.icon} ${arch.name}`} />
+            {path && <DataRow k="Job" v={<span style={{ color: path.color }}>{path.jobClass} · {path.name}</span>} />}
+            {path && <DataRow k="Tier" v={`${getTier(s.level)} · ${["", "Awakened", "Ascendant", "Dominion", "Sovereign", "Transcendent"][getTier(s.level)]}`} />}
             <DataRow k="Status" v={<span style={{ color: status.c }}>{status.t}</span>} />
             <DataRow k="Streak" v={`${s.streak} day${s.streak === 1 ? "" : "s"}`} />
             {s.pact.active && (
@@ -167,7 +173,7 @@ export function ProfileWindow() {
           { l: "GOLD", v: s.gold, c: "var(--gold)" },
           { l: "POTION", v: s.potions, c: "var(--green)" },
           { l: "TOKEN", v: s.relapseTokens, c: "var(--purple)" },
-          { l: "SHADOW", v: s.shadows.length, c: "var(--cyan-bright)" },
+          { l: "DRAFT", v: s.staminaDrafts, c: "var(--cyan-bright)" },
         ].map((x) => (
           <div key={x.l} className="text-center border border-[#ffffff12] bg-[#04101d80] py-1.5">
             <div className="font-mono text-[15px] leading-none" style={{ color: x.c, textShadow: `0 0 10px ${x.c}` }}>
@@ -192,9 +198,8 @@ export function StatusPanel() {
     xp: state.xp, xpMax: state.xpMax, fatigueLevel: state.fatigueLevel,
     inLockdown: state.inLockdown, resurrectDebuff: state.resurrectDebuff,
   })));
-  const { rank, color } = rankFromLevel(s.level);
+  const { id: rank, name: rankName, color } = rankFromLevel(s.level);
   const power = (s.str + s.agi + s.vit) * s.level;
-  const shadows = Math.floor(s.level / 5);
   const alloc = (stat: StatKey) => useGame.getState().allocateStat(stat);
   const canPlus = s.pts > 0 && !s.inLockdown;
 
@@ -214,6 +219,7 @@ export function StatusPanel() {
           <div className="font-head text-[34px] leading-[1] font-black" style={{ color, textShadow: `0 0 20px ${color}` }}>
             {rank}
           </div>
+          <div className="font-sys text-[8px] tracking-wide leading-tight mt-1" style={{ color }}>{rankName}</div>
         </div>
         <div className="text-center">
           <div className="font-sys text-[9px] tracking-[0.24em] text-[color:var(--text-dim)]">POINTS</div>
@@ -257,7 +263,6 @@ export function StatusPanel() {
         <StatCell ico={Glyph.vit} label="VIT" value={s.vit} canPlus={canPlus} onPlus={() => alloc("vit")} />
         <StatCell ico={Glyph.agi} label="AGI" value={s.agi} canPlus={canPlus} onPlus={() => alloc("agi")} />
         <StatCell ico={Glyph.pwr} label="PWR" value={power} />
-        <StatCell ico={Glyph.shd} label="SHD" value={shadows} />
         <StatCell ico={Glyph.ftg} label="FTG" value={`${Math.round(s.fatigueLevel)}%`} />
       </div>
 

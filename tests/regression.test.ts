@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import { ARCHETYPES, ITEMS, SHOP_ITEMS, computeTargets, computePenaltyTargets, rollLoot, POSE_THRESHOLDS, SQUAT_FALLBACK } from "../src/data.ts";
+import { ARCHETYPES, ITEMS, SHOP_ITEMS, computeTargets, computePenaltyTargets, rankFromLevel, rollLoot, POSE_THRESHOLDS, SQUAT_FALLBACK } from "../src/data.ts";
+import { MONARCH_PATHS, PATH_TIERS, PATH_FLOURISH_IDS, gateTitleId, getTier, getPath } from "../src/data/monarchPaths.ts";
+import { fatigueEarned, gateTarget, goldEarned, mondayKey, pathBonuses, shopCost } from "../src/lib/monarch.ts";
 import { awardXP } from "../src/lib/progression.ts";
-import { resolveLoot } from "../src/lib/loot.ts";
+import { grantLoot, resolveLoot } from "../src/lib/loot.ts";
 import { Smoother, type KP } from "../src/lib/pose.ts";
 import { calibrationStatus, measurePose, RepTracker, type Measurement } from "../src/lib/repTracking.ts";
 import { isReminderDue, REMINDER_INTERVAL_MS } from "../src/lib/reminderPolicy.ts";
@@ -26,7 +28,7 @@ function fresh(overrides: Partial<GameState> = {}) {
 function reset(overrides: Partial<GameState> = {}) {
   const data = fresh(overrides);
   data.settings = { ...data.settings, screenShake: false, floatingNumbers: false };
-  useGame.setState({ ...data, dead: false, levelUpFx: false, rankUpFx: null, shadowFx: null, deathCause: "", deathConfirm: false });
+  useGame.setState({ ...data, dead: false, levelUpFx: false, rankUpFx: null, deathCause: "", deathConfirm: false });
 }
 beforeEach(() => reset());
 
@@ -66,51 +68,49 @@ test("Recovery stays positive and penalties remain exactly twice the daily", () 
   }
 });
 
-test("Inventory is cosmetic only, shop is recovery only, and legacy equipment disappears", () => {
-  assert.deepEqual(ITEMS.map((item) => item.id).sort((a, b) => a - b), [13, 14, 100]);
-  assert.deepEqual(SHOP_ITEMS.map((item) => item.kind), ["recovery", "stamina"]);
-  const state = normalizeSave({ name: "Legacy", inventory: [100, 1, 2, 10, 20, 13], equippedItemId: 10, xpBoostEnd: Date.now() + 900000, xpBoostMultiplier: 5 });
+test("Permanent inventory is cosmetic and legacy timed Gates, Shadow RNG and XP equipment disappear", () => {
+  assert.deepEqual(ITEMS.map((item) => item.id).sort((a, b) => a - b), [13, 14, 100, ...PATH_FLOURISH_IDS].sort((a, b) => a - b));
+  assert.deepEqual(SHOP_ITEMS.map((item) => item.kind), ["recovery", "stamina", "elixir", "token", "sigil"]);
+  const state = normalizeSave({ name: "Legacy", inventory: [100, 1, 2, 10, 20, 13], equippedItemId: 10, xpBoostEnd: Date.now() + 900000, xpBoostMultiplier: 5, shadows: ["Igris"], urgentActive: true });
   assert.deepEqual(state.inventory, [100, 13]);
   assert.equal("equippedItemId" in state, false);
   assert.equal("xpBoostEnd" in state, false);
   assert.equal("graveyard" in state, false);
   assert.equal("webhookUrl" in state.settings, false);
+  assert.equal("shadows" in state, false);
+  assert.equal("urgentActive" in state, false);
 });
 
-test("Both themes are reachable from shared loot without duplicate theme rolls", () => {
-  assert.deepEqual(rollLoot([100], () => 0.99), { kind: "theme", themeId: 14 });
-  assert.deepEqual(rollLoot([100, 13], () => 0.99), { kind: "theme", themeId: 14 });
-  assert.deepEqual(rollLoot([100, 13, 14], () => 0.99), { kind: "gold", amount: 60 });
-  assert.deepEqual(rollLoot([100], () => 0.04), { kind: "token", amount: 1 });
+test("Loot reaches both themes and pre-40 path flourishes without duplicating cosmetics", () => {
+  const allFlourishes = [...PATH_FLOURISH_IDS];
+  assert.deepEqual(rollLoot([100], allFlourishes, () => 0.99), { kind: "theme", themeId: 14 });
+  assert.deepEqual(rollLoot([100, 13], allFlourishes, () => 0.99), { kind: "theme", themeId: 14 });
+  assert.deepEqual(rollLoot([100, 13, 14], allFlourishes, () => 0.99), { kind: "gold", amount: 120 });
+  assert.deepEqual(rollLoot([100], [200, 201, 202, 203, 204, 205, 206, 207], () => 0.99), { kind: "flourish", flourishId: 208 });
+  assert.deepEqual(rollLoot([100], allFlourishes, () => 0.04), { kind: "token", amount: 1 });
   const state = fresh();
   const reward = resolveLoot(state, { kind: "potions", amount: 2 });
   assert.equal(reward.patch.potions, 2);
   assert.match(reward.message, /Recovery Potions/);
+  const sigil = resolveLoot(state, { kind: "flourish", flourishId: 200 });
+  assert.ok(sigil.patch.inventory?.includes(200));
+  assert.equal(sigil.patch.equippedFlourishId, null);
 });
 
 test("Side quests cannot spawn before the daily clear and never grant a token on spawn", () => {
   reset({ screen: "main", dailyCompleted: false, questDate: todayISO(), dailyDate: todayISO() });
   for (let i = 0; i < 250; i++) useGame.getState().tick();
   assert.equal(useGame.getState().specialActive, false);
-  assert.equal(useGame.getState().urgentActive, false);
   assert.equal(useGame.getState().relapseTokens, 0);
 });
 
-test("Only a completed daily can spawn one side quest at a time", () => {
+test("Only a completed daily can spawn untimed, dismissible Special Quests", () => {
   const originalRandom = Math.random;
   try {
     Math.random = () => 0.01;
     reset({ screen: "main", dailyCompleted: true, questDate: todayISO(), dailyDate: todayISO() });
     useGame.getState().tick();
     assert.equal(useGame.getState().specialActive, true);
-    assert.equal(useGame.getState().urgentActive, false);
-    assert.equal(useGame.getState().relapseTokens, 0);
-
-    Math.random = () => 0.025;
-    reset({ screen: "main", dailyCompleted: true, questDate: todayISO(), dailyDate: todayISO() });
-    useGame.getState().tick();
-    assert.equal(useGame.getState().specialActive, false);
-    assert.equal(useGame.getState().urgentActive, true);
     assert.equal(useGame.getState().relapseTokens, 0);
   } finally {
     Math.random = originalRandom;
@@ -134,8 +134,8 @@ test("Special quests award relapse tokens only at a 5% successful-clear roll", (
   }
 });
 
-test("XP has no item, potion, theme or Igris multiplier", () => {
-  const state = fresh({ inventory: [100, 13, 14], shadows: ["igris"], potions: 999 });
+test("XP has no theme, sigil, potion or Monarch Path multiplier", () => {
+  const state = fresh({ level: 120, monarchPath: "shadows", clearedGates: [1, 2, 3, 4, 5], inventory: [100, 13, 14, 200], potions: 999 });
   assert.equal(awardXP(state, 100).effXP, 100);
   const specialized = fresh({ archetype: "monarch" });
   assert.equal(awardXP(specialized, 100).effXP, 110);
@@ -276,4 +276,150 @@ test("Six-hour reminders suppress completed, dead, penalized and locked hunters"
   assert.equal(isReminderDue(state, now), true);
   assert.equal(isReminderDue({ ...state, lastReminderCheck: now - REMINDER_INTERVAL_MS + 1 }, now), false);
   for (const flag of ["dailyCompleted", "dead", "inLockdown", "penalty"] as const) assert.equal(isReminderDue({ ...state, [flag]: true }, now), false);
+});
+
+test("Compressed pre-Job ranks and public S-Rank National-Level persist past level 120", () => {
+  assert.deepEqual([1, 9, 10, 19, 20, 29, 30, 34, 35, 39, 40, 55, 120, 1000].map((level) => rankFromLevel(level).id),
+    ["E", "E", "D", "D", "C", "C", "B", "B", "A", "A", "S", "S", "S", "S"]);
+  assert.equal(rankFromLevel(40).name, "S-Rank · National-Level");
+  assert.deepEqual([40, 54, 55, 69, 70, 89, 90, 119, 120, 9999].map(getTier), [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+});
+
+test("Nine distinct data-driven paths have five one-time Gates and no XP skills", () => {
+  assert.equal(MONARCH_PATHS.length, 9);
+  assert.equal(new Set(MONARCH_PATHS.map((path) => path.id)).size, 9);
+  assert.deepEqual(PATH_TIERS.map((tier) => tier.multiplier), [1.5, 1.75, 2, 2.5, 3]);
+  for (const path of MONARCH_PATHS) {
+    assert.equal(path.tiers.length, 5);
+    assert.ok(["push", "sit", "squat"].includes(path.signatureExercise));
+    for (const tier of path.tiers) {
+      assert.ok(tier.gateName && tier.title);
+      assert.ok(tier.skills.length >= 1 && tier.skills.length <= 2);
+      assert.ok(tier.skills.every((skill) => !skill.label.toLowerCase().includes("xp")));
+    }
+  }
+  assert.equal(gateTarget(getPath("shadows")!, 1, "balanced", 40), 150);
+  assert.equal(gateTarget(getPath("shadows")!, 1, "balanced", 40, "recovery"), 90);
+  assert.equal(gateTarget(getPath("shadows")!, 5, "balanced", 120), 300);
+  assert.equal(gateTarget(getPath("shadows")!, 1, "assassin", 40), 173);
+});
+
+test("Every Monarch can clear their signature Tier-1 Gate through the same engine", () => {
+  for (const path of MONARCH_PATHS) {
+    reset({ level: 40, monarchPath: path.id, clearedGates: [], inventory: [100] });
+    const xp = useGame.getState().xp;
+    const target = gateTarget(path, 1, "balanced", 40);
+    assert.equal(useGame.getState().completeGate(1, target - 1), false, `${path.id} counted a partial Gate`);
+    assert.equal(useGame.getState().completeGate(1, target), true, `${path.id} could not clear its Gate`);
+    assert.equal(useGame.getState().xp, xp, `${path.id} granted XP`);
+    assert.deepEqual(useGame.getState().clearedGates, [1]);
+    assert.equal(useGame.getState().completeGate(1, target), false, `${path.id} could repeat its reward`);
+  }
+});
+
+test("Level-40 legacy saves get Job Change; selection is permanent for this hunter", () => {
+  reset({ level: 39 });
+  useGame.getState().chooseMonarchPath("shadows");
+  assert.equal(useGame.getState().monarchPath, null);
+
+  reset({ level: 40, monarchPath: null, inventory: [100, 200] });
+  assert.equal(useGame.getState().monarchPath, null);
+  useGame.getState().chooseMonarchPath("shadows");
+  assert.equal(useGame.getState().monarchPath, "shadows");
+  assert.equal(useGame.getState().equippedFlourishId, 200);
+  useGame.getState().chooseMonarchPath("frost");
+  assert.equal(useGame.getState().monarchPath, "shadows");
+  assert.equal(normalizeSave({ name: "Old", level: 60, inventory: [100], monarchPath: null }).monarchPath, null);
+});
+
+test("Tier Gates award no XP, cannot be farmed or cleared below their level floor, and unlock permanent titles", () => {
+  reset({ level: 40, monarchPath: "shadows", clearedGates: [] });
+  const before = useGame.getState().xp;
+  assert.equal(useGame.getState().completeGate(1, 149), false);
+  assert.equal(useGame.getState().completeGate(2, 175), false);
+  assert.equal(useGame.getState().completeGate(1, 150), true);
+  assert.equal(useGame.getState().xp, before);
+  assert.deepEqual(useGame.getState().clearedGates, [1]);
+  assert.equal(pathBonuses(useGame.getState()).fatigueResist, .08);
+  assert.equal(useGame.getState().completeGate(1, 150), false);
+  useGame.getState().equipTitle(gateTitleId("shadows", 1));
+  assert.equal(useGame.getState().equippedTitle, gateTitleId("shadows", 1));
+  const restored = normalizeSave({ ...useGame.getState() });
+  assert.deepEqual(restored.clearedGates, [1]);
+  assert.equal(restored.equippedTitle, gateTitleId("shadows", 1));
+});
+
+test("Skills are bounded to the chosen path's CLEARED gates and never grant XP", () => {
+  const base = fresh({ level: 70, monarchPath: "shadows", clearedGates: [] });
+  assert.equal(pathBonuses(base).goldBonus, 0);
+  assert.equal(pathBonuses(base).lootLuck, 0);
+  const empowered = fresh({ level: 70, monarchPath: "shadows", clearedGates: [1, 2, 3] });
+  assert.equal(pathBonuses(empowered).fatigueResist, .08);
+  assert.equal(pathBonuses(empowered).goldBonus, .06);
+  assert.equal(pathBonuses(empowered).lootLuck, .08);
+  assert.equal(goldEarned(empowered, 10), 11);
+  assert.ok(Math.abs(fatigueEarned(empowered, 10) - 9.2) < 1e-9);
+  assert.equal(awardXP(empowered, 100).effXP, 100);
+  const double = grantLoot(empowered, () => 0);
+  assert.equal(double.patch.relapseTokens, 2); // base + at most one bonus roll
+});
+
+test("The weekly streak shield forgives exactly its available number of missed days", () => {
+  const yesterday = todayISO(Date.now() - 24 * 3600000);
+  reset({ level: 40, monarchPath: "transfiguration", clearedGates: [1], shieldCharges: 1,
+    shieldWeek: mondayKey(), questDate: yesterday, dailyDate: yesterday, streak: 4 });
+  const hp = useGame.getState().hp;
+  useGame.getState().tick();
+  assert.equal(useGame.getState().shieldCharges, 0);
+  assert.equal(useGame.getState().streak, 4);
+  assert.equal(useGame.getState().hp, hp);
+  assert.equal(useGame.getState().inLockdown, false);
+
+  reset({ level: 120, monarchPath: "iron-body", clearedGates: [2, 5],
+    shieldWeek: "", shieldCharges: 0, questDate: todayISO(), dailyDate: todayISO() });
+  useGame.getState().tick();
+  assert.equal(pathBonuses(useGame.getState()).shieldMax, 2);
+  assert.equal(useGame.getState().shieldCharges, 2);
+});
+
+test("Recovery skills, expanded shop, sigils and once-per-day moves have no XP shortcut", () => {
+  const draft = SHOP_ITEMS.find((item) => item.kind === "stamina")!;
+  assert.equal(shopCost(fresh({ level: 40, monarchPath: "white-flames", clearedGates: [1] }), draft), 24);
+  reset({ level: 40, monarchPath: "frost", clearedGates: [1], gold: 200, fatigueLevel: 50 });
+  useGame.getState().buyPotion();
+  useGame.getState().consumePotion();
+  assert.equal(useGame.getState().fatigueLevel, 30); // full-HP potion still offers Frost recovery
+
+  reset({ level: 90, monarchPath: "beginning", clearedGates: [4], gold: 200, fatigueLevel: 80 });
+  useGame.getState().buyItem(30);
+  useGame.getState().consumeStamina();
+  assert.equal(useGame.getState().fatigueLevel, 25); // 40 base + 15 Legia boost
+
+  reset({ gold: 350, hp: 60, mp: 10, fatigueLevel: 50 });
+  useGame.getState().buyItem(32);
+  useGame.getState().consumeElixir();
+  assert.equal(useGame.getState().hp, useGame.getState().hpMax);
+  assert.equal(useGame.getState().mp, useGame.getState().mpMax);
+  assert.equal(useGame.getState().fatigueLevel, 0);
+  useGame.getState().buyItem(33);
+  assert.equal(useGame.getState().relapseTokens, 1);
+  assert.equal(useGame.getState().xp, 0);
+
+  reset({ level: 40, gold: 100 });
+  useGame.getState().buyItem(34);
+  assert.equal(useGame.getState().gold, 100); // no Job Change yet
+  useGame.getState().chooseMonarchPath("shadows");
+  useGame.getState().buyItem(34);
+  assert.equal(useGame.getState().gold, 40);
+  assert.ok(useGame.getState().inventory.includes(200));
+  useGame.getState().equipItem(200);
+  assert.equal(useGame.getState().equippedFlourishId, null);
+  useGame.getState().equipItem(200);
+  assert.equal(useGame.getState().equippedFlourishId, 200);
+
+  reset({ level: 120, monarchPath: "fangs", clearedGates: [5] });
+  useGame.getState().useSignatureMove();
+  useGame.getState().useSignatureMove();
+  assert.equal(useGame.getState().relapseTokens, 1);
+  assert.equal(useGame.getState().xp, 0);
 });

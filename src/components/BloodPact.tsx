@@ -34,7 +34,7 @@ const STAKES: {
     name: "Iron Vow",
     tag: "PERMADEATH",
     color: "#c81432",
-    desc: "Commit to a fresh start after death: level, items and shadows reset. Only your local pact ledger remains. This app cannot prevent restoring your own save backup.",
+    desc: "Commit to a fresh start after death: level, Monarch path, skills and items reset. Only your local pact ledger remains. You control your own backups.",
   },
 ];
 

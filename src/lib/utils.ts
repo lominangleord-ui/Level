@@ -1,6 +1,5 @@
 export const SAVE_KEY = "sl_fitness_v3";
 export const PENALTY_MS = 360 * 60 * 1000; // 360 minutes
-export const URGENT_MS = 60 * 1000;
 
 /** Centralized day-boundary math [Bug #4] */
 export function getMsUntilMidnight(now = Date.now()): number {

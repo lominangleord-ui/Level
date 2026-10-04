@@ -24,7 +24,7 @@ export function RewardModal() {
   const options = [
     { k: "status" as const, ico: "💚", t: "Status Recovery", d: "Full HP / MP restore + fatigue cleared." },
     { k: "stat" as const, ico: "💪", t: "Stat Points", d: "+3 to a stat of your choosing." },
-    { k: "loot" as const, ico: "🎁", t: "Loot Box", d: "Recovery potions, a token, gold or a cosmetic HUD theme." },
+    { k: "loot" as const, ico: "🎁", t: "Loot Box", d: "Recovery, rare tokens, gold, themes or Monarch sigils. No XP gear." },
   ];
 
   return (

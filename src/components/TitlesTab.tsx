@@ -1,16 +1,18 @@
 import { useShallow } from "zustand/react/shallow";
 import { useGame } from "../store/game";
-import { TITLES, SHADOWS } from "../data";
+import { TITLES } from "../data";
+import { getPath, PATH_TIERS, gateTitleId } from "../data/monarchPaths";
 import { SystemWindow } from "./SystemWindow";
 
 export function TitlesTab() {
   const s = useGame(useShallow((state) => ({
     level: state.level, streak: state.streak,
     notifiedTitles: state.notifiedTitles, equippedTitle: state.equippedTitle,
-    shadows: state.shadows,
+    monarchPath: state.monarchPath, clearedGates: state.clearedGates,
   })));
   const unlockedIds = s.notifiedTitles;
   const equipTitle = useGame((st) => st.equipTitle);
+  const path = getPath(s.monarchPath);
 
   return (
     <div className="space-y-4">
@@ -68,33 +70,21 @@ export function TitlesTab() {
         </div>
       </SystemWindow>
 
-      <SystemWindow title="SHADOW ARMY" accent="#a855ff">
-        {s.shadows.length === 0 ? (
-          <p className="font-sys text-[11px] tracking-[0.1em] text-[color:var(--text-dim)] text-center py-5 leading-relaxed">
-            NO SHADOWS EXTRACTED
-            <br />
-            <span className="text-[10px]">Clear Urgent Gates for a chance at extraction.</span>
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-            {SHADOWS.filter((sh) => s.shadows.includes(sh.id)).map((sh) => (
-              <div
-                key={sh.id}
-                className="p-2.5 border flex items-center gap-2.5"
-                style={{ borderColor: "var(--purple-dim)", background: "#a855ff0a" }}
-              >
-                <span className="text-2xl leading-none">{sh.icon}</span>
-                <div>
-                  <div className="font-sys text-[12px] font-600 tracking-[0.1em] text-[color:var(--text-bright)]">
-                    {sh.name}
-                  </div>
-                  <div className="text-[10px] text-[color:var(--purple)]">{sh.effect}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </SystemWindow>
+      {path && <SystemWindow title="PATH TITLES" accent={path.color}>
+        <p className="text-[11px] text-[color:var(--text-mid)] mb-3">A permanent title for each cleared Monarch Gate. Only titles from your chosen path can be equipped.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {PATH_TIERS.map((band) => {
+            const cleared = s.clearedGates.includes(band.number);
+            const id = gateTitleId(path.id, band.number);
+            const equipped = s.equippedTitle === id;
+            return <button key={band.number} disabled={!cleared} className="p-3 border text-left" onClick={() => equipTitle(id)} style={{ borderColor: equipped ? path.color : "#ffffff20", opacity: cleared ? 1 : .45 }}>
+              <div className="font-sys text-[12px] font-bold text-[color:var(--text-bright)]">{path.icon} {path.tiers[band.number - 1].title}</div>
+              <div className="font-mono text-[9px] mt-1" style={{ color: cleared ? path.color : "var(--text-dim)" }}>{equipped ? "EQUIPPED" : cleared ? `${band.name.toUpperCase()} · TAP TO EQUIP` : `LOCKED · ${path.tiers[band.number - 1].gateName}`}</div>
+            </button>;
+          })}
+        </div>
+      </SystemWindow>}
+
     </div>
   );
 }

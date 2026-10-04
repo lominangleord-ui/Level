@@ -46,7 +46,7 @@ export function Death() {
               You swore to <b className="text-[color:var(--text-bright)]">{pact.witness}</b> that
               death would be final. Arising will{" "}
               <b className="text-[color:#ff7a8c]">permanently erase</b> this hunter — every level,
-              item and shadow. The local pact ledger is kept.
+              item and Monarch path. The local pact ledger is kept.
             </p>
           </div>
         )}

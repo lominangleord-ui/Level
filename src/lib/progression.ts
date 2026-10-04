@@ -4,7 +4,7 @@ import type { GameState } from "../types";
 /** XP comes from completed training. Adaptive rewards are set before this pipeline. */
 export function awardXP(state: GameState, rawXP: number) {
   const effXP = Math.round(rawXP * ARCHETYPES[state.archetype].xpMult);
-  const oldRank = rankFromLevel(state.level).rank;
+  const oldRank = rankFromLevel(state.level).id;
   state.xp += effXP;
   let leveled = false;
   while (state.xp >= state.xpMax) {
@@ -28,6 +28,6 @@ export function awardXP(state: GameState, rawXP: number) {
     state.mp = state.mpMax;
     leveled = true;
   }
-  const newRank = rankFromLevel(state.level).rank;
+  const newRank = rankFromLevel(state.level).id;
   return { effXP, leveled, rankChanged: oldRank !== newRank, newRank };
 }

@@ -4,6 +4,7 @@ import { rankFromLevel } from "../data";
 import { RunicText } from "./common";
 import { SystemWindow } from "./SystemWindow";
 import { audio } from "../lib/audio";
+import { getPath, PATH_TIERS } from "../data/monarchPaths";
 
 export function LevelUpFx() {
   const show = useGame((s) => s.levelUpFx);
@@ -60,7 +61,7 @@ export function RankUpFx() {
   }, [rank, clear]);
 
   if (!rank) return null;
-  const { color } = rankFromLevel(level);
+  const { color, name } = rankFromLevel(level);
 
   return (
     <div className="fixed inset-0 z-[76] grid place-items-center pointer-events-none">
@@ -71,62 +72,46 @@ export function RankUpFx() {
         <div className="font-head text-[30px] sm:text-[38px] font-black tracking-[0.36em]" style={{ color, textShadow: `0 0 40px ${color}` }}>
           <RunicText text={`RANK ${rank}`} duration={700} />
         </div>
-        <div className="font-sys text-[10px] tracking-[0.4em] text-[color:var(--text-dim)]">ATTAINED</div>
+        <div className="font-sys text-[10px] tracking-[0.2em] text-[color:var(--text-dim)]">{name.toUpperCase()} ATTAINED</div>
       </div>
     </div>
   );
 }
 
-export function ShadowFx() {
-  const shadow = useGame((s) => s.shadowFx);
-  const clear = useGame((s) => s.clearShadowFx);
+export function GateClearFx() {
+  const scene = useGame((s) => s.gateClearFx);
+  const clear = useGame((s) => s.clearGateFx);
 
   useEffect(() => {
-    if (shadow) {
-      audio.death();
-      const id = setTimeout(clear, 3800);
-      return () => clearTimeout(id);
-    }
-  }, [shadow, clear]);
+    if (!scene) return;
+    const timer = window.setTimeout(clear, 3000);
+    return () => window.clearTimeout(timer);
+  }, [scene, clear]);
 
-  if (!shadow) return null;
+  if (!scene) return null;
+  const path = getPath(scene.path);
+  if (!path) return null;
+  const extracted = path.id === "shadows" && scene.tier === 1;
 
-  return (
-    <div className="fixed inset-0 z-[77] grid place-items-center sys-backdrop" onClick={clear}>
-      <div className="absolute inset-0 grid place-items-center pointer-events-none">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div
-            key={i}
-            className="absolute rounded-full border shadow-vortex"
-            style={{
-              width: `${i * 96}px`,
-              height: `${i * 96}px`,
-              borderColor: "var(--purple)",
-              opacity: 0.16,
-              animationDuration: `${2.4 + i * 0.7}s`,
-              animationDirection: i % 2 ? "normal" : "reverse",
-            }}
-          />
-        ))}
-      </div>
-
-      <div className="text-center space-y-3 relative z-[1]">
-        <div className="font-kr text-[76px] leading-none font-black text-[color:var(--purple)]"
-             style={{ textShadow: "0 0 50px var(--purple)" }}>
-          <RunicText text="추출" duration={800} />
-        </div>
-        <div className="text-[76px] leading-none">{shadow.icon}</div>
-        <div className="font-head text-[40px] font-black tracking-[0.28em] text-[color:var(--purple)]"
-             style={{ textShadow: "0 0 34px var(--purple)" }}>
-          {shadow.name}
-        </div>
-        <div className="font-sys text-[12px] tracking-[0.12em] text-[color:var(--text-mid)] max-w-[300px] mx-auto">
-          {shadow.effect}
-        </div>
-        <div className="font-sys text-[9px] tracking-[0.4em] text-[color:var(--text-dim)] pt-3">
-          ARISE — TAP TO DISMISS
-        </div>
-      </div>
+  return <div className="gate-clear-overlay fixed inset-0 z-[77] sys-backdrop flex items-center justify-center p-5" role="dialog" aria-label="Monarch Gate cleared">
+    <div className="gate-portal" style={{ ["--cyan" as string]: path.color }} aria-hidden="true">
+      {[0, 1, 2].map((index) => <span key={index} className="gate-ring" />)}
     </div>
-  );
+    <div className="w-full max-w-[480px] relative z-[1]" style={{ ["--path-color" as string]: path.color }}>
+      <SystemWindow title={extracted ? "SHADOW EXTRACTION" : "GATE CLEARED"} accent={path.color}>
+        <div className="text-center py-5 space-y-3">
+          <div className="font-kr text-[38px]" style={{ color: path.color, textShadow: `0 0 30px ${path.color}` }}>
+            <RunicText text={extracted ? "추출" : path.icon} duration={600} />
+          </div>
+          <p className="font-mono text-[10px] tracking-[.2em] text-[color:var(--text-dim)]">TIER {scene.tier} · {PATH_TIERS[scene.tier - 1].name.toUpperCase()}</p>
+          <h2 className="font-head text-[25px] sm:text-[30px]" style={{ color: path.color, textShadow: `0 0 22px ${path.color}` }}>
+            {extracted ? "IGRIS · ARISE" : path.tiers[scene.tier - 1].gateName}
+          </h2>
+          <p className="text-[12px] text-[color:var(--text-mid)]">{extracted ? "Your first shadow answers the call. No passive XP bonus." : `Title unlocked: ${path.tiers[scene.tier - 1].title}`}</p>
+          <button className="sl-btn w-full mt-3" onClick={clear}>CONTINUE</button>
+        </div>
+      </SystemWindow>
+    </div>
+  </div>;
 }
+

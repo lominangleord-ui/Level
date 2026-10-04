@@ -528,13 +528,6 @@ button { cursor:pointer; background:none; border:none; padding:0; color:inherit;
 }
 
 /* ═══════ MISC ═══════ */
-.pulse-border { animation:pulseBorder 1.5s ease-in-out infinite; }
-@keyframes pulseBorder {
-  0%,100%{border-color:var(--red-dim);box-shadow:0 0 18px #ff3b5222,inset 0 0 22px #ff3b520d}
-  50%{border-color:var(--red);box-shadow:0 0 38px #ff3b5244,inset 0 0 32px #ff3b521a}
-}
-.shadow-vortex { animation:vortexSpin 5s linear infinite; }
-@keyframes vortexSpin { to{transform:rotate(360deg)} }
 .typing-caret::after { content:"▋"; animation:blink 900ms steps(1) infinite; color:var(--cyan); }
 @keyframes blink { 50%{opacity:0} }
 
@@ -555,6 +548,69 @@ button { cursor:pointer; background:none; border:none; padding:0; color:inherit;
 .font-sys  { font-family:var(--font-sys); }
 .font-mono { font-family:var(--font-mono); }
 .font-kr   { font-family:var(--font-kr); }
+
+/* Level-40 Job Change uses the same framed System windows, scaled into a ceremony. */
+.job-overlay {
+  position:fixed; inset:0; z-index:88; overflow-y:auto;
+  display:grid; place-items:center; padding:22px 14px 40px;
+  background:radial-gradient(ellipse at 50% 22%,#193459bd 0%,#020916ed 44%,#000308f9 100%);
+}
+.job-aura {
+  position:fixed; inset:0; pointer-events:none;
+  background:radial-gradient(circle at 50% 38%,#79b8ff19,transparent 58%);
+  animation:jobAura 5s ease-in-out infinite alternate;
+}
+@keyframes jobAura { from{opacity:.4;transform:scale(.95)} to{opacity:1;transform:scale(1.08)} }
+.job-inner { position:relative; width:min(100%,980px); margin:auto; }
+.job-heading { text-shadow:0 0 26px var(--cyan),0 0 64px var(--cyan-glow); }
+.job-path-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.job-path {
+  display:grid; grid-template-columns:32px minmax(0,1fr); align-items:start; gap:9px;
+  min-height:108px; padding:12px; text-align:left; color:var(--text-mid);
+  border:1px solid #ffffff22;
+  background:linear-gradient(135deg,#081725ee,#030a14ee);
+  transition:transform .2s var(--ease-sys),border-color .2s,box-shadow .2s;
+}
+.job-path:hover,.job-path.selected { transform:translateY(-2px); border-color:var(--path-color); box-shadow:0 0 24px color-mix(in srgb,var(--path-color) 28%,transparent),inset 0 0 18px color-mix(in srgb,var(--path-color) 8%,transparent); }
+.job-path-icon { color:var(--path-color); font-family:var(--font-head); font-size:28px; line-height:1.1; text-shadow:0 0 13px var(--path-color); }
+.job-path-name { display:block; font-family:var(--font-sys); font-weight:700; font-size:13px; line-height:1.15; color:var(--text-bright); }
+.job-path-class { display:block; font-family:var(--font-mono); font-size:10px; margin-top:4px; color:var(--path-color); }
+.job-path-flavor { display:block; font-size:11px; line-height:1.3; color:var(--text); margin-top:7px; }
+.job-path { position:relative; }
+.job-path-mark {
+  position:absolute; top:7px; right:9px;
+  color:var(--path-color); font-size:12px;
+  text-shadow:0 0 10px var(--path-color);
+}
+.job-confirm { margin-top:13px; padding:14px; border:1px solid var(--cyan-dim); background:#081625df; }
+@media(max-width:720px) { .job-path-grid{grid-template-columns:repeat(2,minmax(0,1fr))} .job-path{min-height:120px;padding:10px;grid-template-columns:22px minmax(0,1fr);gap:6px}.job-path-icon{font-size:21px}.job-path-name{font-size:11px}.job-path-flavor{font-size:10px} }
+@media(max-width:440px) { .job-path-grid{grid-template-columns:1fr}.job-path{min-height:unset}.job-path-flavor{margin-top:4px} }
+
+/* Path accents appear only after a confirmed Job Change. Base blue/purple/gold HUD
+   themes stay switchable independently; a sigil adds a stronger cosmetic finish. */
+.job-changed .top-mark { text-shadow:0 0 16px var(--path-accent),0 0 24px var(--cyan); }
+.job-changed .path-preview,.job-changed .path-gate.available { border-color:color-mix(in srgb,var(--path-color) 48%,transparent); }
+.job-changed.sigil-active .win-frame { box-shadow:0 0 0 1px #0008,0 0 30px var(--cyan-glow),-2px 0 19px color-mix(in srgb,var(--path-accent) 32%,transparent),inset 0 0 35px #0006; }
+.job-changed.sigil-active .top-bar::before {
+  content:""; position:absolute; top:0; left:0; width:120px; height:2px;
+  background:linear-gradient(90deg,var(--path-accent),transparent);
+  box-shadow:0 0 12px var(--path-accent);
+}
+.path-hero { display:flex; gap:15px; align-items:center; }
+.path-hero-icon { flex:none; width:78px; height:78px; border:1px solid var(--path-color); display:grid; place-items:center; font-size:40px; font-family:var(--font-head); color:var(--path-color); text-shadow:0 0 25px var(--path-color); box-shadow:inset 0 0 23px color-mix(in srgb,var(--path-color) 20%,transparent),0 0 23px color-mix(in srgb,var(--path-color) 26%,transparent); }
+.path-gate { display:flex; align-items:center; gap:12px; min-height:90px; padding:12px; border:1px solid #ffffff18; background:#07111eac; transition:border-color .2s,box-shadow .2s; }
+.path-gate.available { box-shadow:inset 0 0 20px color-mix(in srgb,var(--path-color) 10%,transparent); }
+.path-gate.cleared { border-color:#2fe08a50; background:#08201666; }
+.path-gate.locked { opacity:.55; }
+.path-gate-number { font-family:var(--font-head); font-size:32px; line-height:1; color:var(--path-color); flex:none; width:38px; }
+.path-gate.cleared .path-gate-number { color:var(--green); }
+.path-gate-action { flex:none; font-size:10px; padding:10px 12px; border-color:var(--path-color); color:var(--text-bright); }
+.path-preview { width:100%; display:flex; gap:12px; align-items:center; text-align:left; padding:13px; border:1px solid var(--path-color); background:linear-gradient(90deg,color-mix(in srgb,var(--path-color) 15%,#07101c),#040b16); box-shadow:0 0 22px color-mix(in srgb,var(--path-color) 18%,transparent); transition:transform .2s; }
+.path-preview:hover { transform:translateY(-2px); }
+.path-preview-icon { display:grid; place-items:center; flex:none; font-size:25px; color:var(--path-color); width:42px; height:42px; border:1px solid color-mix(in srgb,var(--path-color) 60%,transparent); text-shadow:0 0 16px var(--path-color); }
+.path-soldier { border:1px solid color-mix(in srgb,var(--path-color) 40%,transparent); padding:8px 10px; color:var(--text-bright); font-family:var(--font-sys); font-size:11px; letter-spacing:.06em; }
+.gate-clear-overlay .gate-portal { z-index:0; }
+@media(max-width:590px) { .path-hero-icon{width:58px;height:58px;font-size:30px} .path-gate{flex-wrap:wrap} .path-gate-action{margin-left:auto} }
 
 .cam-viewbox {
   position:relative; overflow:hidden; width:100%;

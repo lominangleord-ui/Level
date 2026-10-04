@@ -7,40 +7,39 @@ import type {
   StatKey,
   Tab,
   SlNotification,
-  ShadowDef,
   PactStake,
   PenaltyTargets,
+  PathId,
+  TierNumber,
 } from "../types";
 import {
   ARCHETYPES,
   computeTargets,
   computePenaltyTargets,
-  rollLoot,
   SHOP_ITEMS,
   ITEMS,
-  SHADOWS,
   SPECIAL_QUESTS,
   STARTER_THEME_ID,
   TITLES,
-  URGENT_QUESTS,
   getItem,
 } from "../data";
+import { getPath, MONARCH_PATHS, PATH_FLOURISH_IDS, PATH_TIERS } from "../data/monarchPaths";
+import { fatigueEarned, gateTarget, goldEarned, isPathTitleValid, mondayKey, pathBonuses, shopCost } from "../lib/monarch";
 import {
   PENALTY_MS,
   SAVE_KEY,
-  URGENT_MS,
   clamp,
   todayISO,
 } from "../lib/utils";
 import { audio, startDrone, stopDrone, voice } from "../lib/audio";
 import { shake, flash, fct, fctBurst } from "../lib/juice";
-import { resolveLoot } from "../lib/loot";
+import { grantLoot } from "../lib/loot";
 import { awardXP } from "../lib/progression";
 
 interface FxState {
   levelUpFx: boolean;
   rankUpFx: string | null;
-  shadowFx: ShadowDef | null;
+  gateClearFx: { path: PathId; tier: TierNumber } | null;
   dead: boolean;
   deathCause: string;
   deathConfirm: boolean;
@@ -49,6 +48,9 @@ interface FxState {
 interface Actions {
   awaken: (name: string, archetype: ArchetypeId, avatar: string) => void;
   finishAwakening: () => void;
+  chooseMonarchPath: (path: PathId) => void;
+  completeGate: (tier: TierNumber, reps: number) => boolean;
+  useSignatureMove: () => void;
   setTab: (t: Tab) => void;
   setAvatar: (a: string) => void;
   // quest
@@ -65,7 +67,8 @@ interface Actions {
   equipItem: (id: number) => void;
   consumePotion: () => void;
   consumeStamina: () => void;
-  equipTitle: (id: number) => void;
+  consumeElixir: () => void;
+  equipTitle: (id: number | string) => void;
   // reward
   claimReward: (kind: "status" | "stat" | "loot", stat?: StatKey) => void;
   // penalty / death
@@ -73,11 +76,9 @@ interface Actions {
   submitPenalty: (push: number, sit: number, run: number) => void;
   resurrect: () => void;
   requestOblivion: () => void;
-  // special / urgent
+  // special
   completeSpecial: () => void;
   dismissSpecial: () => void;
-  completeUrgent: (reps: number) => void;
-  dismissUrgent: () => void;
   // notifications
   notify: (n: SlNotification) => void;
   dismissNotify: () => void;
@@ -94,7 +95,7 @@ interface Actions {
   // fx
   clearLevelUpFx: () => void;
   clearRankUpFx: () => void;
-  clearShadowFx: () => void;
+  clearGateFx: () => void;
   // system
   tick: () => void;
   importState: (data: unknown) => void;
@@ -158,14 +159,17 @@ function defaultState(): GameState {
     inventory: [STARTER_THEME_ID],
     equippedTitle: null,
     notifiedTitles: [],
-    shadows: [],
     hudTheme: "system-blue",
+    equippedFlourishId: null,
+    monarchPath: null,
+    clearedGates: [],
+    shieldCharges: 0,
+    shieldWeek: "",
+    signatureUsedDate: "",
+    elixirs: 0,
     fatigueLevel: 0,
     specialActive: false,
     specialQuest: null,
-    urgentActive: false,
-    urgentQuest: null,
-    urgentEnd: 0,
     rewardChoicePending: false,
     resurrectDebuff: 0,
     pendingHardcoreDebuff: false,
@@ -227,6 +231,21 @@ export function normalizeSave(input: unknown): GameState {
   fresh.archetype = saved.archetype && Object.prototype.hasOwnProperty.call(ARCHETYPES, String(saved.archetype))
     ? saved.archetype as ArchetypeId
     : "balanced";
+  fresh.monarchPath = getPath(typeof saved.monarchPath === "string" ? saved.monarchPath as PathId : null)?.id ?? null;
+  fresh.clearedGates = Array.isArray(saved.clearedGates) && fresh.monarchPath
+    ? [...new Set(saved.clearedGates.filter((tier): tier is TierNumber =>
+        Number.isInteger(tier) && tier >= 1 && tier <= 5 && PATH_TIERS[tier - 1].min <= fresh.level))].sort() as TierNumber[]
+    : [];
+  fresh.equippedFlourishId = typeof saved.equippedFlourishId === "number"
+    && PATH_FLOURISH_IDS.includes(saved.equippedFlourishId)
+    && fresh.inventory.includes(saved.equippedFlourishId)
+    && getItem(saved.equippedFlourishId)?.pathFlourish === fresh.monarchPath
+    ? saved.equippedFlourishId : null;
+  if (!fresh.monarchPath || fresh.level < 40) {
+    fresh.monarchPath = null;
+    fresh.clearedGates = [];
+    fresh.equippedFlourishId = null;
+  }
   fresh.inventory = [...new Set([
     STARTER_THEME_ID,
     ...fresh.inventory.filter((id) => ITEMS.some((item) => item.id === id)),
@@ -234,11 +253,7 @@ export function normalizeSave(input: unknown): GameState {
   if (!ITEMS.some((item) => fresh.inventory.includes(item.id) && item.theme === fresh.hudTheme)) {
     fresh.hudTheme = "system-blue";
   }
-  fresh.shadows = fresh.shadows.filter((id) => SHADOWS.some((shadow) => shadow.id === id));
   fresh.notifiedTitles = fresh.notifiedTitles.filter((id) => TITLES.some((title) => title.id === id));
-  const urgent = saved.urgentQuest as { id?: number } | null;
-  fresh.urgentQuest = URGENT_QUESTS.find((quest) => quest.id === urgent?.id) ?? null;
-  fresh.urgentActive = fresh.dailyCompleted && fresh.urgentActive && fresh.urgentQuest !== null;
   const special = saved.specialQuest as { id?: number } | null;
   fresh.specialQuest = SPECIAL_QUESTS.find((quest) => quest.id === special?.id) ?? null;
   fresh.specialActive = fresh.dailyCompleted && fresh.specialActive && fresh.specialQuest !== null;
@@ -270,9 +285,13 @@ export function normalizeSave(input: unknown): GameState {
   fresh.mpMax = maxima.mpMax;
   fresh.hp = Math.min(fresh.hp, fresh.hpMax);
   fresh.mp = Math.min(fresh.mp, fresh.mpMax);
-  fresh.equippedTitle = typeof saved.equippedTitle === "number" && TITLES.some((title) => title.id === saved.equippedTitle
-    && (title.level == null || fresh.level >= title.level) && (title.streak == null || fresh.streak >= title.streak))
-    ? saved.equippedTitle : null;
+  fresh.equippedTitle =
+    (typeof saved.equippedTitle === "number" && TITLES.some((title) => title.id === saved.equippedTitle
+      && (title.level == null || fresh.level >= title.level) && (title.streak == null || fresh.streak >= title.streak)))
+    || (typeof saved.equippedTitle === "string" && isPathTitleValid(fresh, saved.equippedTitle))
+      ? saved.equippedTitle as number | string : null;
+  fresh.shieldWeek = typeof saved.shieldWeek === "string" ? saved.shieldWeek : "";
+  fresh.shieldCharges = Math.min(fresh.shieldCharges, pathBonuses(fresh).shieldMax);
   fresh.dayMode = ["classic", "recovery", "overdrive"].includes(fresh.dayMode)
     ? fresh.dayMode : "classic";
   fresh.dailyTargetLevel = typeof saved.dailyTargetLevel === "number" && Number.isFinite(saved.dailyTargetLevel)
@@ -307,13 +326,6 @@ export const useGame = create<Store>()(
   persist(
     (set, get) => {
       // ---- internal helpers operating on a draft ----
-      function goldMultiplier(s: GameState): number {
-        return s.shadows.includes("iron") ? 1.03 : 1;
-      }
-      function fatigueMultiplier(s: GameState): number {
-        return s.shadows.includes("tank") ? 0.95 : 1;
-      }
-
       function queueTitleChecks(s: GameState) {
         // unlock detection
         const unlocked = TITLES.filter(
@@ -340,7 +352,7 @@ export const useGame = create<Store>()(
           }
         }
         // Bug #6: re-validate equipped title
-        if (s.equippedTitle != null && !unlocked.includes(s.equippedTitle)) {
+        if (typeof s.equippedTitle === "number" && !unlocked.includes(s.equippedTitle)) {
           s.equippedTitle = null;
         }
       }
@@ -349,7 +361,7 @@ export const useGame = create<Store>()(
         ...defaultState(),
         levelUpFx: false,
         rankUpFx: null,
-        shadowFx: null,
+        gateClearFx: null,
         dead: false,
         deathCause: "",
         deathConfirm: false,
@@ -369,6 +381,69 @@ export const useGame = create<Store>()(
           if (!get().name) return;
           applyPendingHardcore(get, set);
           set({ screen: "main" });
+        },
+
+        chooseMonarchPath: (id) => {
+          const s = get();
+          const path = getPath(id);
+          if (!path || s.monarchPath || s.level < 40 || s.dead || s.inLockdown) return;
+          const sigil = PATH_FLOURISH_IDS[MONARCH_PATHS.findIndex((entry) => entry.id === id)];
+          set({
+            monarchPath: id,
+            equippedFlourishId: s.inventory.includes(sigil) ? sigil : null,
+            levelUpFx: false,
+            rankUpFx: null,
+          });
+          audio.rankUp();
+          get().notify({ title: "Job Change Complete", message: `<b>${path.name}</b> · ${path.jobClass}<br/>Your path is permanent. Its first Gate is ready when you are.`, type: "System" });
+        },
+
+        completeGate: (tier, reps) => {
+          const s = get();
+          const path = getPath(s.monarchPath);
+          const band = PATH_TIERS[tier - 1];
+          if (!path || !band || s.level < band.min || s.clearedGates.includes(tier) || s.dead || s.inLockdown || !Number.isInteger(reps)) return false;
+          const target = gateTarget(path, tier, s.archetype, s.dailyTargetLevel ?? s.level, s.dayMode);
+          if (reps < target) return false;
+          const rewardMessage = grantLoot(s);
+          const newlyCleared = [...s.clearedGates, tier].sort((a, b) => a - b);
+          const maxBefore = pathBonuses(s).shieldMax;
+          const maxAfter = pathBonuses({ monarchPath: s.monarchPath, clearedGates: newlyCleared }).shieldMax;
+          set({
+            clearedGates: newlyCleared,
+            ...rewardMessage.patch,
+            shieldCharges: Math.min(maxAfter, s.shieldCharges + (maxAfter - maxBefore)),
+            shieldWeek: maxAfter > 0 ? mondayKey() : s.shieldWeek,
+            gateClearFx: { path: path.id, tier },
+          });
+          audio.rankUp();
+          get().notify({
+            title: `${band.name} Gate Cleared`,
+            message: `<b>${path.tiers[tier - 1].gateName}</b> cleared in one camera session.<br/>Title unlocked: <b>${path.tiers[tier - 1].title}</b><br/>${rewardMessage.message}`,
+            type: "System",
+          });
+          return true;
+        },
+
+        useSignatureMove: () => {
+          const s = get();
+          const skill = pathBonuses(s).signature;
+          if (!skill || s.dead || s.inLockdown || s.signatureUsedDate === todayISO()) return;
+          if (skill.action === "clearFatigue" && s.fatigueLevel <= 0) return;
+          let message = "";
+          if (skill.action === "clearFatigue") {
+            set({ fatigueLevel: 0, signatureUsedDate: todayISO() });
+            message = "Fatigue completely cleared.";
+          } else if (skill.action === "token") {
+            set({ relapseTokens: s.relapseTokens + 1, signatureUsedDate: todayISO() });
+            message = "+1 Relapse Token. Once per day, earned through the final Gate.";
+          } else {
+            const reward = grantLoot(s);
+            set({ ...reward.patch, signatureUsedDate: todayISO() });
+            message = reward.message;
+          }
+          audio.chime();
+          get().notify({ title: skill.name, message, type: "System" });
         },
 
         setTab: (t) => set({ tab: t }),
@@ -401,12 +476,9 @@ export const useGame = create<Store>()(
             const cur = Math.min(targets[key], s[key]);
             const next = clamp(cur + amount, 0, targets[key]);
             const gained = next - cur;
-            const goldGain = Math.round(
-              (key === "run" ? gained * 10 : gained) * goldMultiplier(s),
-            );
+            const goldGain = goldEarned(s, key === "run" ? gained * 10 : gained);
             shownGold = goldGain;
-            const fat =
-              (key === "run" ? gained * 2 : gained * 0.18) * fatigueMultiplier(s);
+            const fat = fatigueEarned(s, key === "run" ? gained * 2 : gained * 0.18);
             const doneKey = `${key}Done` as const;
             return {
               [key]: next,
@@ -484,47 +556,64 @@ export const useGame = create<Store>()(
         buyItem: (id) => {
           const s = get();
           const item = SHOP_ITEMS.find((entry) => entry.id === id);
-          if (!item || s.gold < item.cost || s.dead || s.inLockdown) return;
+          if (!item || s.dead || s.inLockdown) return;
+          const cost = shopCost(s, item);
+          if (s.gold < cost) return;
+          const path = getPath(s.monarchPath);
+          const flourishId = path ? PATH_FLOURISH_IDS[MONARCH_PATHS.findIndex((entry) => entry.id === path.id)] : null;
+          if (item.kind === "sigil" && (!path || flourishId === null || s.inventory.includes(flourishId))) return;
           set({
-            gold: s.gold - item.cost,
+            gold: s.gold - cost,
             potions: s.potions + (item.kind === "recovery" ? 1 : 0),
             staminaDrafts: s.staminaDrafts + (item.kind === "stamina" ? 1 : 0),
+            elixirs: s.elixirs + (item.kind === "elixir" ? 1 : 0),
+            relapseTokens: s.relapseTokens + (item.kind === "token" ? 1 : 0),
+            inventory: flourishId !== null && item.kind === "sigil" ? [...s.inventory, flourishId] : s.inventory,
+            equippedFlourishId: item.kind === "sigil" ? flourishId : s.equippedFlourishId,
           });
           audio.buy();
         },
 
         equipItem: (id) => {
           const item = getItem(id);
-          if (!item || !get().inventory.includes(id)) return;
-          set({ hudTheme: item.theme });
+          const s = get();
+          if (!item || !s.inventory.includes(id) || s.dead || s.inLockdown) return;
+          if (item.theme) set({ hudTheme: item.theme });
+          else if (item.pathFlourish && item.pathFlourish === s.monarchPath && s.level >= 40) {
+            set({ equippedFlourishId: s.equippedFlourishId === id ? null : id });
+          } else return;
           audio.chime();
         },
 
         consumePotion: () => {
           const s = get();
+          const bonus = pathBonuses(s).potionFatigue;
           if (s.inLockdown || s.dead) return;
-          if (s.potions <= 0 || (s.hp >= s.hpMax && s.mp >= s.mpMax)) return;
-          set({ potions: s.potions - 1, hp: s.hpMax, mp: s.mpMax });
+          if (s.potions <= 0 || (s.hp >= s.hpMax && s.mp >= s.mpMax && (bonus === 0 || s.fatigueLevel <= 0))) return;
+          set({ potions: s.potions - 1, hp: s.hpMax, mp: s.mpMax, fatigueLevel: Math.max(0, s.fatigueLevel - bonus) });
           audio.chime();
         },
 
         consumeStamina: () => {
           const s = get();
           if (s.inLockdown || s.dead || s.staminaDrafts <= 0 || s.fatigueLevel <= 0) return;
-          set({ staminaDrafts: s.staminaDrafts - 1, fatigueLevel: Math.max(0, s.fatigueLevel - 40) });
+          set({ staminaDrafts: s.staminaDrafts - 1, fatigueLevel: Math.max(0, s.fatigueLevel - 40 - pathBonuses(s).draftPower) });
+          audio.chime();
+        },
+
+        consumeElixir: () => {
+          const s = get();
+          if (s.inLockdown || s.dead || s.elixirs <= 0 || (s.hp >= s.hpMax && s.mp >= s.mpMax && s.fatigueLevel <= 0)) return;
+          set({ elixirs: s.elixirs - 1, hp: s.hpMax, mp: s.mpMax, fatigueLevel: 0 });
           audio.chime();
         },
 
         equipTitle: (id) => {
           const s = get();
-          // Recompute LIVE eligibility (notifiedTitles is a grow-only history,
-          // so a streak-based title could otherwise be re-equipped after the
-          // streak reset — mirrors queueTitleChecks()'s validation).
-          const title = TITLES.find((t) => t.id === id);
-          const isCurrentlyValid =
-            !!title &&
-            (title.level == null || s.level >= title.level) &&
-            (title.streak == null || s.streak >= title.streak);
+          const title = typeof id === "number" ? TITLES.find((t) => t.id === id) : null;
+          const isCurrentlyValid = typeof id === "string"
+            ? isPathTitleValid(s, id)
+            : !!title && (title.level == null || s.level >= title.level) && (title.streak == null || s.streak >= title.streak);
           if (!isCurrentlyValid) return;
           set({ equippedTitle: id });
           audio.chime();
@@ -559,7 +648,7 @@ export const useGame = create<Store>()(
             });
             audio.levelUp();
           } else if (kind === "loot") {
-            const reward = resolveLoot(s, rollLoot(s.inventory));
+            const reward = grantLoot(s);
             set({ ...reward.patch, rewardChoicePending: false });
             audio.questComplete();
             get().notify({ title: "Loot Acquired", message: reward.message, type: "System" });
@@ -668,7 +757,7 @@ export const useGame = create<Store>()(
             ...fresh,
             levelUpFx: false,
             rankUpFx: null,
-            shadowFx: null,
+            gateClearFx: null,
             dead: false,
             deathConfirm: false,
             deathCause: "",
@@ -688,9 +777,11 @@ export const useGame = create<Store>()(
           if (!s.specialQuest || !s.specialActive || !s.dailyCompleted || s.dead || s.inLockdown) return;
           const q = s.specialQuest;
           const tokenDrop = Math.random() < 0.05;
+          let earnedXP = 0;
           set((st) => {
             const draft = { ...st };
             const fx = awardXP(draft, q.xp);
+            earnedXP = fx.effXP;
             if (q.stat && q.statAmt) {
               (draft[q.stat] as number) += q.statAmt;
               if (q.stat === "vit") {
@@ -704,9 +795,9 @@ export const useGame = create<Store>()(
             draft.specialActive = false;
             draft.specialQuest = null;
             if (tokenDrop) draft.relapseTokens += 1;
-            if (fx.leveled) {
-              draft.levelUpFx = true as any;
-              if (fx.rankChanged) draft.rankUpFx = fx.newRank as any;
+            if (fx.leveled && !(draft.level >= 40 && !draft.monarchPath)) {
+              draft.levelUpFx = true;
+              if (fx.rankChanged) draft.rankUpFx = fx.newRank;
             }
             queueTitleChecks(draft);
             return draft;
@@ -715,55 +806,13 @@ export const useGame = create<Store>()(
           get().notify({
             title: "Special Quest Cleared",
             message: tokenDrop
-              ? `${q.name} complete. <b>Rare drop: +1 Relapse Token.</b>`
-              : `${q.name} complete. +${q.xp} XP${q.stat ? ` · +${q.statAmt} ${q.stat.toUpperCase()}` : ""}.`,
+              ? `${q.name} complete. +${earnedXP} XP${q.stat ? ` · +${q.statAmt} ${q.stat.toUpperCase()}` : ""}. <b>Rare drop: +1 Relapse Token.</b>`
+              : `${q.name} complete. +${earnedXP} XP${q.stat ? ` · +${q.statAmt} ${q.stat.toUpperCase()}` : ""}.`,
             type: "System",
           });
         },
 
         dismissSpecial: () => set({ specialActive: false, specialQuest: null }),
-
-        completeUrgent: (reps) => {
-          const s = get();
-          if (!s.dailyCompleted || !s.urgentQuest || !s.urgentActive || s.dead || s.inLockdown || s.urgentEnd <= Date.now()) return;
-          const q = s.urgentQuest;
-          if (reps < q.target) return;
-          const loot = rollLoot(s.inventory);
-          let lootMessage = "";
-          set((st) => {
-            const draft = { ...st };
-            const fx = awardXP(draft, q.xp);
-            if (fx.leveled) draft.levelUpFx = true;
-            if (fx.rankChanged) draft.rankUpFx = fx.newRank;
-            draft.gold += Math.round(q.gold * goldMultiplier(draft));
-            const reward = resolveLoot(draft, loot);
-            Object.assign(draft, reward.patch);
-            lootMessage = reward.message;
-            draft.urgentActive = false;
-            draft.urgentQuest = null;
-            draft.urgentEnd = 0;
-            queueTitleChecks(draft);
-            return draft;
-          });
-          audio.questComplete();
-          get().notify({
-            title: "Gate Cleared",
-            message: `Reward: +${Math.round(q.xp * ARCHETYPES[s.archetype].xpMult)} XP, +${Math.round(q.gold * goldMultiplier(s))} gold<br/>${lootMessage}`,
-            type: "System",
-          });
-          // Shadow Extraction — 25% chance [B.3]
-          if (Math.random() < 0.25) {
-            const shadow = SHADOWS[Math.floor(Math.random() * SHADOWS.length)];
-            if (get().shadows.includes(shadow.id)) {
-              set((st) => ({ gold: st.gold + 20 }));
-            } else {
-              set((st) => ({ shadows: [...st.shadows, shadow.id], shadowFx: shadow }));
-            }
-          }
-        },
-
-        dismissUrgent: () =>
-          set({ urgentActive: false, urgentQuest: null, urgentEnd: 0 }),
 
         notify: (n) => set((s) => ({ notifications: [...s.notifications, n] })),
         dismissNotify: () => set((s) => ({ notifications: s.notifications.slice(1) })),
@@ -813,13 +862,13 @@ export const useGame = create<Store>()(
 
         clearLevelUpFx: () => set({ levelUpFx: false }),
         clearRankUpFx: () => set({ rankUpFx: null }),
-        clearShadowFx: () => set({ shadowFx: null }),
+        clearGateFx: () => set({ gateClearFx: null }),
 
         importState: (data) => {
           if (!isSaveFile(data)) throw new Error("This file does not contain a valid hunter save.");
           const normalized = normalizeSave(data);
           set({ ...normalized, dead: normalized.hp <= 0 && !!normalized.name,
-            levelUpFx: false, rankUpFx: null, shadowFx: null, deathCause: "", deathConfirm: false });
+            levelUpFx: false, rankUpFx: null, gateClearFx: null, deathCause: "", deathConfirm: false });
         },
 
         hardReset: () => {
@@ -827,7 +876,7 @@ export const useGame = create<Store>()(
           const fresh = defaultState();
           fresh.settings = settings;
           fresh.pactLedger = get().pactLedger;
-          set({ ...fresh, levelUpFx: false, rankUpFx: null, shadowFx: null, dead: false });
+          set({ ...fresh, levelUpFx: false, rankUpFx: null, gateClearFx: null, dead: false });
         },
 
         tick: () => runTick(set, get),
@@ -835,7 +884,7 @@ export const useGame = create<Store>()(
     },
     {
       name: SAVE_KEY,
-      version: 7,
+      version: 9,
       storage: createJSONStorage(() => localStorage),
       migrate: (data) => normalizeSave(data),
       merge: (data, current) => ({ ...current, ...normalizeSave(data) }),
@@ -906,8 +955,7 @@ function maybeCompleteDaily(
     draft.pts += 3;
     draft.hp = draft.hpMax;
     draft.mp = draft.mpMax;
-    const goldMult = draft.shadows.includes("iron") ? 1.03 : 1;
-    draft.gold += Math.round(goldReward * goldMult);
+    draft.gold += goldEarned(draft, goldReward);
     draft.streak += 1;
     draft.dailyCompleted = true;
     draft.rewardChoicePending = true;
@@ -951,11 +999,11 @@ function maybeCompleteDaily(
         }, 2500);
       }
     }
-    if (draft.equippedTitle != null && !unlocked.includes(draft.equippedTitle)) {
+    if (typeof draft.equippedTitle === "number" && !unlocked.includes(draft.equippedTitle)) {
       draft.equippedTitle = null;
     }
 
-    if (eff.leveled) {
+    if (eff.leveled && !(draft.level >= 40 && !draft.monarchPath)) {
       draft.levelUpFx = true;
       if (eff.rankChanged) draft.rankUpFx = eff.newRank;
     }
@@ -969,7 +1017,7 @@ function maybeCompleteDaily(
   flash("#1e9bff", 0.3);
   fctBurst([
     { text: `${earnedXP} XP`, kind: "crit" },
-    { text: `${goldReward} GOLD`, kind: "gold" },
+    { text: `${goldEarned(after, goldReward)} GOLD`, kind: "gold" },
     { text: "3 STAT POINTS", kind: "stat" },
     { text: `STREAK ${after.streak}`, kind: "heal" },
   ]);
@@ -988,48 +1036,65 @@ function runTick(set: (fn: any) => void, get: () => Store) {
   if (s.screen !== "main" || s.dead) return;
   const today = todayISO();
 
+  const shieldMax = pathBonuses(s).shieldMax;
+  if (shieldMax > 0 && s.shieldWeek !== mondayKey()) {
+    set({ shieldWeek: mondayKey(), shieldCharges: shieldMax });
+    s = get();
+  }
+
   // ---- Day boundary check [A.5] ----
   if (s.questDate && s.questDate !== today) {
     // An unresolved penalty keeps its original deadline; a new day must not extend it.
     if (!s.dailyCompleted && !s.penalty) {
-      // penalty
-      const survives = s.hp - 20 > 0;
-      const penaltyTargets = computePenaltyTargets(s.getTargets());
-      set((st: Store) => {
-        // Streak is being zeroed — revalidate the equipped title now (Bug #6):
-        // a streak-gated title must not stay displayed after its condition fails.
-        const stillValid =
-          st.equippedTitle == null ||
-          TITLES.some(
-            (t) =>
+      const missedDays = Math.max(1, Math.round((Date.parse(`${today}T12:00:00`) - Date.parse(`${s.questDate}T12:00:00`)) / 86400000) || 1);
+      const shieldSpent = Math.min(missedDays, s.shieldCharges);
+      if (shieldSpent > 0) {
+        set({ shieldCharges: s.shieldCharges - shieldSpent });
+        get().notify({
+          title: "Streak Shield Activated",
+          message: missedDays <= shieldSpent
+            ? `${shieldSpent} missed day${shieldSpent === 1 ? "" : "s"} forgiven. Streak and HP protected. Charges recharge on Monday.`
+            : `${shieldSpent} missed day${shieldSpent === 1 ? "" : "s"} forgiven, but more time passed. The remaining miss triggers Lockdown.`,
+          type: "System",
+        });
+      }
+      if (missedDays > shieldSpent) {
+        // The shield covers only its actual number of missed days.
+        const survives = s.hp - 20 > 0;
+        const penaltyTargets = computePenaltyTargets(s.getTargets());
+        set((st: Store) => {
+          // Path Gate titles are permanent; only expired streak titles disappear.
+          const stillValid =
+            st.equippedTitle == null ||
+            (typeof st.equippedTitle === "string" && isPathTitleValid(st, st.equippedTitle)) ||
+            TITLES.some((t) =>
               t.id === st.equippedTitle &&
               (t.level == null || st.level >= t.level) &&
               (t.streak == null || 0 >= t.streak),
-          );
-        return {
-          penalty: true,
-          penaltyEnd: Date.now() + PENALTY_MS,
-          penaltyTargets,
-          penPushDone: 0,
-          penSitDone: 0,
-          penRunDone: false,
-          hp: Math.max(0, st.hp - 20),
-          streak: 0,
-          equippedTitle: stillValid ? st.equippedTitle : null,
-        };
-      });
-      // ── damage juice ──
-      shake("lg");
-      flash("#ff3b52", 0.4);
-      fct(20, "dmg");
-      // Real-world stake fires on the missed day itself, before anything else.
-      reportPactBreach(set, get, "Daily Quest failed — day missed");
-      if (survives) {
-        // Penalty red is a temporary UI override, not a permanently equipped theme.
-        set({ inLockdown: true });
-        startDrone();
-      } else {
-        triggerDeathModule(set, get, "Streak Broken");
+            );
+          return {
+            penalty: true,
+            penaltyEnd: Date.now() + PENALTY_MS,
+            penaltyTargets,
+            penPushDone: 0,
+            penSitDone: 0,
+            penRunDone: false,
+            hp: Math.max(0, st.hp - 20),
+            streak: 0,
+            equippedTitle: stillValid ? st.equippedTitle : null,
+          };
+        });
+        shake("lg");
+        flash("#ff3b52", 0.4);
+        fct(20, "dmg");
+        reportPactBreach(set, get, "Daily Quest failed — day missed");
+        if (survives) {
+          // Penalty red temporarily overrides the cosmetic theme.
+          set({ inLockdown: true });
+          startDrone();
+        } else {
+          triggerDeathModule(set, get, "Streak Broken");
+        }
       }
     }
     // reset today's progress + apply adaptive day mode
@@ -1068,22 +1133,11 @@ function runTick(set: (fn: any) => void, get: () => Store) {
   s = get();
   if (s.dead) return;
 
-  // ---- Urgent quest expiry ----
-  if (s.urgentActive && s.urgentEnd > 0 && Date.now() > s.urgentEnd) {
-    set({ urgentActive: false, urgentQuest: null, urgentEnd: 0 });
-    get().notify({
-      title: "Gate Collapsed",
-      message: "The urgent quest window has closed.",
-      type: "Alert",
-    });
-  }
-
   // ---- Random spawns (not during lockdown) ----
-  if (s.dailyCompleted && !s.inLockdown && !s.dead && (typeof document === "undefined" || !document.hidden)) {
-    // Side quests unlock only after the daily work is done. One event per tick.
+  if (s.dailyCompleted && !s.inLockdown && !s.dead && (s.level < 40 || !!s.monarchPath) && (typeof document === "undefined" || !document.hidden)) {
+    // Dismissible, untimed Special Quests unlock after the daily work is done.
     const current = get();
-    const spawnRoll = Math.random();
-    if (!current.specialActive && !current.urgentActive && spawnRoll < 0.02) {
+    if (!current.specialActive && Math.random() < 0.02) {
       const q = SPECIAL_QUESTS[Math.floor(Math.random() * SPECIAL_QUESTS.length)];
       set({
         specialActive: true,
@@ -1094,10 +1148,6 @@ function runTick(set: (fn: any) => void, get: () => Store) {
         message: `⚡ <b>${q.name}</b><br/>${q.desc}<br/>Rare Relapse Token drop: 5% on completion.`,
         type: "Emergency",
       });
-    } else if (!current.specialActive && !current.urgentActive && spawnRoll < 0.032) {
-      const q = URGENT_QUESTS[Math.floor(Math.random() * URGENT_QUESTS.length)];
-      set({ urgentActive: true, urgentQuest: q, urgentEnd: Date.now() + URGENT_MS });
-      audio.rankUp();
     }
   }
 }
@@ -1125,9 +1175,6 @@ function applyNewDay(set: (fn: any) => void, get: () => Store, today: string) {
     dailyTargetLevel: null,
     specialActive: false,
     specialQuest: null,
-    urgentActive: false,
-    urgentQuest: null,
-    urgentEnd: 0,
     dayMode,
   });
 }

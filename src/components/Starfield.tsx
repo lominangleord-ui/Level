@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useGame } from "../store/game";
 import { rankFromLevel } from "../data";
+import { getPath } from "../data/monarchPaths";
 
 function glowSprite(color: string, haze = false) {
   const sprite = document.createElement("canvas");
@@ -23,7 +24,7 @@ export function Starfield({ paused = false }: { paused?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pausedRef = useRef(paused);
   const syncRef = useRef<(() => void) | null>(null);
-  const color = useGame((s) => rankFromLevel(s.level).color);
+  const color = useGame((s) => getPath(s.monarchPath)?.color ?? rankFromLevel(s.level).color);
   const nearCount = useGame((s) => Math.min(16, 10 + Math.floor(s.level / 10)));
   const inLockdown = useGame((s) => s.inLockdown);
   pausedRef.current = paused;

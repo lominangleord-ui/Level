@@ -1,36 +1,63 @@
 export type Screen = "loading" | "intro" | "awaken" | "main";
-export type Tab = "quest" | "titles" | "pact" | "log";
+export type Tab = "quest" | "path" | "titles" | "pact" | "log";
 export type ThemeId = "system-blue" | "penalty-red" | "shadow-purple" | "monarch-gold";
 export type ArchetypeId = "balanced" | "assassin" | "monarch" | "vanguard";
 export type ExerciseKey = "push" | "sit" | "squat" | "run";
 export type CameraExercise = Exclude<ExerciseKey, "run">;
-export type CameraPurpose = "daily" | "penalty" | "urgent";
+export type CameraPurpose = "daily" | "penalty" | "gate";
 export type StatKey = "str" | "agi" | "vit";
 export type PenaltyTargets = Record<"push" | "sit" | "run", number>;
+export type PathId = "shadows" | "destruction" | "white-flames" | "fangs" | "frost" | "iron-body" | "beginning" | "plagues" | "transfiguration";
+export type TierNumber = 1 | 2 | 3 | 4 | 5;
+
+export type PathSkill =
+  | { kind: "goldBonus" | "fatigueResist" | "lootLuck"; amount: number; label: string }
+  | { kind: "recoveryBoost"; mode: "staminaDiscount" | "potionFatigue" | "draftPower"; amount: number; label: string }
+  | { kind: "streakShield"; charges: 1; label: string }
+  | { kind: "signatureMove"; action: "clearFatigue" | "token" | "loot"; name: string; label: string };
+
+export interface PathTier {
+  gateName: string;
+  title: string;
+  skills: PathSkill[];
+}
+
+export interface MonarchPath {
+  id: PathId;
+  name: string;
+  jobClass: string;
+  flavor: string;
+  signatureExercise: CameraExercise;
+  icon: string;
+  color: string;
+  tiers: readonly [PathTier, PathTier, PathTier, PathTier, PathTier];
+}
 
 export interface Item {
   id: number;
   name: string;
   icon: string;
   desc: string;
-  theme: Exclude<ThemeId, "penalty-red">;
-  pool: "cosmetic" | "starter";
+  theme?: Exclude<ThemeId, "penalty-red">;
+  pathFlourish?: PathId;
+  pool: "cosmetic" | "starter" | "flourish";
 }
 
-export interface Consumable {
+export interface ShopItem {
   id: number;
   name: string;
   icon: string;
   desc: string;
   cost: number;
-  kind: "recovery" | "stamina";
+  kind: "recovery" | "stamina" | "elixir" | "token" | "sigil";
 }
 
 export type LootRoll =
   | { kind: "potions"; amount: number }
   | { kind: "token"; amount: number }
   | { kind: "gold"; amount: number }
-  | { kind: "theme"; themeId: number };
+  | { kind: "theme"; themeId: number }
+  | { kind: "flourish"; flourishId: number };
 
 export interface TitleDef {
   id: number;
@@ -41,13 +68,6 @@ export interface TitleDef {
   streak?: number;
 }
 
-export interface ShadowDef {
-  id: string;
-  name: string;
-  icon: string;
-  effect: string;
-}
-
 export interface SpecialQuest {
   id: number;
   name: string;
@@ -55,16 +75,6 @@ export interface SpecialQuest {
   xp: number;
   stat?: StatKey;
   statAmt?: number;
-}
-
-export interface UrgentQuest {
-  id: number;
-  name: string;
-  desc: string;
-  exercise: ExerciseKey;
-  target: number;
-  xp: number;
-  gold: number;
 }
 
 export interface HistoryEntry {
@@ -168,22 +178,27 @@ export interface GameState {
   potions: number;
   staminaDrafts: number;
   inventory: number[];
-  equippedTitle: number | null;
+  equippedTitle: number | string | null;
   notifiedTitles: number[];
-  shadows: string[];
 
   // cosmetic theme
   hudTheme: ThemeId;
+  equippedFlourishId: number | null;
+
+  // Level 40 Job Change and independent, one-time camera Gates.
+  monarchPath: PathId | null;
+  clearedGates: TierNumber[];
+  shieldCharges: number;
+  shieldWeek: string;
+  signatureUsedDate: string;
+  elixirs: number;
 
   // fatigue
   fatigueLevel: number;
 
-  // special / urgent
+  // optional special quest (no timer)
   specialActive: boolean;
   specialQuest: SpecialQuest | null;
-  urgentActive: boolean;
-  urgentQuest: UrgentQuest | null;
-  urgentEnd: number;
 
   // reward
   rewardChoicePending: boolean;
