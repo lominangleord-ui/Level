@@ -68,7 +68,7 @@ export function RunicText({
   const [display, setDisplay] = useState(text);
 
   useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (document.documentElement.classList.contains("fast-mode") || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setDisplay(text);
       return;
     }
@@ -126,7 +126,7 @@ export function CountUp({
   useEffect(() => {
     const from = fromRef.current;
     if (from === value) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (document.documentElement.classList.contains("fast-mode") || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       fromRef.current = value;
       setShown(value);
       return;

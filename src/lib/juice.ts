@@ -6,7 +6,7 @@
 
 import { useGame } from "../store/game";
 
-type FctKind = "xp" | "gold" | "dmg" | "heal" | "crit" | "stat" | "rep";
+type FctKind = "xp" | "gold" | "dmg" | "heal" | "crit" | "stat" | "rep" | "hit";
 
 const FCT_STYLE: Record<FctKind, { color: string; size: string; prefix: string }> = {
   xp:   { color: "#7fd0ff", size: "26px", prefix: "+" },
@@ -16,13 +16,15 @@ const FCT_STYLE: Record<FctKind, { color: string; size: string; prefix: string }
   crit: { color: "#ffe08a", size: "40px", prefix: "" },
   stat: { color: "#a855ff", size: "24px", prefix: "+" },
   rep:  { color: "#e9f4ff", size: "30px", prefix: "" },
+  hit:  { color: "#7fd0ff", size: "28px", prefix: "" },
 };
 
 function enabled(flag: "screenShake" | "floatingNumbers") {
   if (typeof window === "undefined" || typeof document === "undefined" || document.hidden) return false;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
   try {
-    return useGame.getState().settings[flag] !== false;
+    const settings = useGame.getState().settings;
+    return !settings.fastMode && settings[flag] !== false;
   } catch {
     return true;
   }

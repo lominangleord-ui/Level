@@ -8,9 +8,6 @@ import { CALIBRATION_FRAMES, POSE_CONFIDENCE, calibrationStatus, measurePose, Re
 import { audio } from "../lib/audio";
 import { SystemWindow } from "./SystemWindow";
 import { CameraGuide } from "./CameraGuide";
-import { gateTarget } from "../lib/monarch";
-import { getPath, PATH_TIERS } from "../data/monarchPaths";
-import type { TierNumber } from "../types";
 
 type Phase = "loading" | "calibrating" | "tracking" | "finished" | "error";
 
@@ -102,21 +99,16 @@ function cameraError(error: unknown) {
   return error instanceof Error ? error.message : "Camera verification could not start. Please retry or log manually.";
 }
 
-function CameraSession({ exercise, purpose, gateTier, close }: { exercise: CameraExercise; purpose: CameraPurpose; gateTier: TierNumber | null; close: () => void }) {
+function CameraSession({ exercise, purpose, close }: { exercise: CameraExercise; purpose: CameraPurpose; close: () => void }) {
   const [session] = useState(() => {
     const state = useGame.getState();
     const targets = state.getTargets();
     const penaltyGoal = exercise === "push" || exercise === "sit" ? state.getPenaltyTargets()[exercise] : 0;
-    const path = getPath(state.monarchPath);
-    const challenge = purpose === "gate" && path && gateTier ? gateTarget(path, gateTier, state.archetype, state.dailyTargetLevel ?? state.level, state.dayMode) : null;
     return {
       date: state.questDate,
-      pathId: state.monarchPath,
-      tier: gateTier,
-      gateName: path && gateTier ? path.tiers[gateTier - 1].gateName : "",
       target: purpose === "penalty"
         ? Math.max(1, penaltyGoal - (exercise === "push" ? state.penPushDone : state.penSitDone))
-        : challenge ?? Math.max(1, Math.ceil(targets[exercise] - state[exercise])),
+        : Math.max(1, Math.ceil(targets[exercise] - state[exercise])),
     };
   });
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -139,6 +131,15 @@ function CameraSession({ exercise, purpose, gateTier, close }: { exercise: Camer
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState("");
   const [rest, setRest] = useState(0);
+  const [manualReps, setManualReps] = useState("");
+
+  const logManual = (amountStr: string) => {
+    const val = parseInt(amountStr);
+    if (val > 0) {
+      countRef.current = val;
+      commit();
+    }
+  };
 
   const finish = (text: string) => {
     endedRef.current = true;
@@ -158,14 +159,6 @@ function CameraSession({ exercise, purpose, gateTier, close }: { exercise: Camer
       if (purpose === "penalty") {
         if (state.inLockdown && exercise !== "squat") state.addPenaltyProgress(exercise, n);
         else message = "The penalty is no longer active. No progress was changed.";
-      } else if (purpose === "gate") {
-        if (state.monarchPath !== session.pathId || !session.tier || state.inLockdown) {
-          message = "This challenge is no longer active. No Gate reward was claimed.";
-        } else if (n >= session.target && state.completeGate(session.tier, n)) {
-          message = `${session.gateName} cleared in one camera session. Your tier skill, title and loot are now available.`;
-        } else {
-          message = `${n}/${session.target} reps counted. This Gate gives no partial credit, but you may try again at any time with no timer or attempt limit.`;
-        }
       } else if (state.questDate === session.date && !state.inLockdown && !state.dailyCompleted) {
         state.logExercise(exercise, n, true);
       } else {
@@ -344,23 +337,34 @@ function CameraSession({ exercise, purpose, gateTier, close }: { exercise: Camer
     if (!submittedRef.current && countRef.current > 0) commitRef.current();
     close();
   };
-  const name = purpose === "gate" ? session.gateName.toUpperCase() : { push: "PUSH-UPS", sit: "SIT-UPS", squat: "SQUATS" }[exercise];
+  const name = { push: "PUSH-UPS", sit: "SIT-UPS", squat: "SQUATS" }[exercise];
 
   return (
     <div className="fixed inset-0 z-[85] sys-backdrop camera-overlay" role="dialog" aria-modal="true" aria-label={`${name} camera verification`}>
       <div className="camera-shell">
         <header className="flex items-center justify-between gap-3 mb-3">
           <div>
-            <div className="font-head text-[16px] font-bold tracking-wider text-[color:var(--cyan-bright)]">{name} / {purpose === "gate" ? `TIER ${session.tier}` : purpose.toUpperCase()}</div>
+            <div className="font-head text-[16px] font-bold tracking-wider text-[color:var(--cyan-bright)]">{name} / {purpose.toUpperCase()}</div>
           </div>
-          <button className="sl-btn sl-btn-danger px-3 text-[10px]" onClick={saveAndClose}>{reps > 0 && phase !== "finished" ? "SAVE & CLOSE" : "CLOSE"}</button>
+          <div className="flex items-center gap-2">
+            <button
+              className="sl-btn sl-btn-gold px-2.5 py-1 text-[10px]"
+              onClick={() => {
+                const entered = prompt(`Camera issue? Enter number of ${name.toLowerCase()} completed:`);
+                if (entered) logManual(entered);
+              }}
+            >
+              LOG INSTEAD
+            </button>
+            <button className="sl-btn sl-btn-danger px-3 py-1 text-[10px]" onClick={saveAndClose}>{reps > 0 && phase !== "finished" ? "SAVE & CLOSE" : "CLOSE"}</button>
+          </div>
         </header>
 
         {phase === "finished" ? (
           <SystemWindow title="SESSION COMPLETE" titleSize="sm" accent="#2fe08a">
             <div className="text-center space-y-3">
               <div className="cam-rep-counter text-[48px]">{reps}</div>
-              <div className="font-mono text-[10px] text-[color:var(--text)]">CAMERA-COUNTED REPS {purpose === "gate" ? `/ ${session.target} REQUIRED` : ""}</div>
+              <div className="font-mono text-[10px] text-[color:var(--text)]">CAMERA-COUNTED REPS</div>
               <p className="text-[13px] text-[color:var(--text-mid)] leading-relaxed">{result}</p>
               {rest > 0 ? <div className="font-mono text-[32px] text-[color:var(--cyan-bright)]">{rest}s REST</div>
                 : <button className="sl-btn w-full" onClick={() => setRest(60)}>START REST (60s)</button>}
@@ -393,7 +397,6 @@ function CameraSession({ exercise, purpose, gateTier, close }: { exercise: Camer
               {phase === "calibrating" && <div className="bar-track mt-2"><div className="bar-fill" style={{ width: `${calibration}%`, background: "var(--cyan)" }} /></div>}
               <p className="text-[13px] text-[color:var(--text-mid)] leading-relaxed mt-3 min-h-[40px]" aria-live="polite">{paused ? "Paused. Take a breath; resume when ready." : feedback}</p>
               {phase === "loading" && <p className="text-[11px] text-[color:var(--text)] mt-2">The first model download needs internet. Your video stays on this device. Camera permission and model preparation run together.</p>}
-              {purpose === "gate" && <p className="text-[11px] text-[color:var(--gold)] mt-2">{PATH_TIERS[(session.tier ?? 1) - 1].name} Gate: {session.target} {exercise === "push" ? "push-ups" : exercise === "sit" ? "sit-ups" : "squats"} in this session. No countdown or attempt limit; pause between sets as needed. Gate reps are separate from daily progress.</p>}
               {phase === "tracking" && <>
                 <canvas ref={gaugeRef} width={132} height={82} className="my-3" />
                 <div className="flex gap-2">
@@ -406,7 +409,30 @@ function CameraSession({ exercise, purpose, gateTier, close }: { exercise: Camer
                 </div>
               </>}
               {phase === "calibrating" && <CameraGuide exercise={exercise} compact />}
-              <p className="text-[10.5px] text-[color:var(--text)] mt-3">Guidance, not medical or anti-cheat certification. Camera estimates can miss reps; manual logging is always available.</p>
+
+              <div className="mt-3 pt-2.5 border-t border-[#ffffff14]">
+                <div className="font-sys text-[9px] tracking-[0.2em] text-[color:var(--text-dim)] uppercase mb-1.5">
+                  Camera not working? Log manually:
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    type="number"
+                    value={manualReps}
+                    onChange={(e) => setManualReps(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && logManual(manualReps)}
+                    placeholder="Enter reps..."
+                    className="sl-input py-1 text-xs flex-1 w-0"
+                  />
+                  <button
+                    className="sl-btn sl-btn-gold px-3 py-1 text-[10px] shrink-0"
+                    onClick={() => logManual(manualReps)}
+                  >
+                    LOG
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-[color:var(--text-dim)] mt-2">Guidance, not medical or anti-cheat certification. Manual logging is always available.</p>
             </aside>
           </div>
         )}
@@ -418,9 +444,8 @@ function CameraSession({ exercise, purpose, gateTier, close }: { exercise: Camer
 export function CameraOverlay() {
   const exercise = useUi((s) => s.camExercise);
   const purpose = useUi((s) => s.camPurpose);
-  const gateTier = useUi((s) => s.camGateTier);
   const close = useUi((s) => s.closeCamera);
   if (!exercise) return null;
   // A body portal keeps fixed positioning correct even while the HUD shakes.
-  return createPortal(<CameraSession key={`${exercise}:${purpose}:${gateTier}`} exercise={exercise} purpose={purpose} gateTier={gateTier} close={close} />, document.body);
+  return createPortal(<CameraSession key={`${exercise}:${purpose}`} exercise={exercise} purpose={purpose} close={close} />, document.body);
 }

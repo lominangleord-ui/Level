@@ -8,12 +8,17 @@ export function RewardModal() {
   const pending = useGame((s) => s.rewardChoicePending);
   const inLockdown = useGame((s) => s.inLockdown);
   const claim = useGame((s) => s.claimReward);
+  const fastMode = useGame((s) => s.settings.fastMode);
   const [statPick, setStatPick] = useState(false);
   const [rolling, setRolling] = useState(false);
 
   if (!pending || inLockdown) return null;
 
   const doLoot = () => {
+    if (fastMode) {
+      claim("loot");
+      return;
+    }
     setRolling(true);
     setTimeout(() => {
       claim("loot");

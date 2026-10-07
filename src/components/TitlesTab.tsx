@@ -78,8 +78,8 @@ export function TitlesTab() {
             const id = gateTitleId(path.id, band.number);
             const equipped = s.equippedTitle === id;
             return <button key={band.number} disabled={!cleared} className="p-3 border text-left" onClick={() => equipTitle(id)} style={{ borderColor: equipped ? path.color : "#ffffff20", opacity: cleared ? 1 : .45 }}>
-              <div className="font-sys text-[12px] font-bold text-[color:var(--text-bright)]">{path.icon} {path.tiers[band.number - 1].title}</div>
-              <div className="font-mono text-[9px] mt-1" style={{ color: cleared ? path.color : "var(--text-dim)" }}>{equipped ? "EQUIPPED" : cleared ? `${band.name.toUpperCase()} · TAP TO EQUIP` : `LOCKED · ${path.tiers[band.number - 1].gateName}`}</div>
+              <div className="font-sys text-[12px] font-bold text-[color:var(--text-bright)]">{path.icon} Cleared: {path.tiers[band.number - 1].gateName}</div>
+              <div className="font-mono text-[9px] mt-1" style={{ color: cleared ? path.color : "var(--text-dim)" }}>{equipped ? "EQUIPPED" : cleared ? `${band.name.toUpperCase()} · TAP TO EQUIP` : `LOCKED · TIER ${band.number}`}</div>
             </button>;
           })}
         </div>

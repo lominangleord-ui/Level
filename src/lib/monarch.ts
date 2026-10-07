@@ -1,12 +1,6 @@
-import { computeTargets } from "../data";
-import { getClearedSkills, getPath, PATH_TIERS, gateTitleId } from "../data/monarchPaths";
+import { getClearedSkills, getPath, gateTitleId } from "../data/monarchPaths";
 import { todayISO } from "./utils";
-import type { ArchetypeId, GameState, MonarchPath, PathId, PathSkill, ShopItem, TierNumber } from "../types";
-
-export function gateTarget(path: MonarchPath, tier: TierNumber, archetype: ArchetypeId, level: number, dayMode: GameState["dayMode"] = "classic"): number {
-  const goal = computeTargets(archetype, dayMode, level)[path.signatureExercise];
-  return Math.round(goal * PATH_TIERS[tier - 1].multiplier);
-}
+import type { GameState, PathId, PathSkill, ShopItem, TierNumber } from "../types";
 
 export function mondayKey(at = Date.now()): string {
   const date = new Date(at);
@@ -59,5 +53,5 @@ export function isPathTitleValid(state: Pick<GameState, "monarchPath" | "cleared
 
 export function pathTitle(pathId: PathId, tier: TierNumber) {
   const path = getPath(pathId);
-  return path ? { id: gateTitleId(pathId, tier), name: path.tiers[tier - 1].title, icon: path.icon } : null;
+  return path ? { id: gateTitleId(pathId, tier), name: `Cleared: ${path.tiers[tier - 1].gateName}`, icon: path.icon } : null;
 }

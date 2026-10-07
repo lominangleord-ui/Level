@@ -1,10 +1,10 @@
 export type Screen = "loading" | "intro" | "awaken" | "main";
-export type Tab = "quest" | "path" | "titles" | "pact" | "log";
+export type Tab = "quest" | "journey" | "titles" | "pact" | "log";
 export type ThemeId = "system-blue" | "penalty-red" | "shadow-purple" | "monarch-gold";
 export type ArchetypeId = "balanced" | "assassin" | "monarch" | "vanguard";
 export type ExerciseKey = "push" | "sit" | "squat" | "run";
 export type CameraExercise = Exclude<ExerciseKey, "run">;
-export type CameraPurpose = "daily" | "penalty" | "gate";
+export type CameraPurpose = "daily" | "penalty";
 export type StatKey = "str" | "agi" | "vit";
 export type PenaltyTargets = Record<"push" | "sit" | "run", number>;
 export type PathId = "shadows" | "destruction" | "white-flames" | "fangs" | "frost" | "iron-body" | "beginning" | "plagues" | "transfiguration";
@@ -22,14 +22,107 @@ export interface PathTier {
   skills: PathSkill[];
 }
 
+/* ── Battle moves ──
+   Gate movesets and the pre-Job Change class kit share one shape so a single
+   battle engine can run both. Every path's five moves fill the same five
+   mechanical roles, and every class's kit fills the same role spread, so only
+   the names and art change between them. */
+export type MoveRole =
+  | "basic" | "opener" | "weaken" | "empower" | "drain" | "heal" | "finisher" | "ultimate";
+
+/** The mechanical half of a move: everything the battle engine reads. */
+export interface MoveLike {
+  id: string;
+  name: string;
+  role: MoveRole;
+  /** Multiplier applied to your own ATK (0 = no direct damage). */
+  power: number;
+  /** Applied to the enemy for the rest of the fight. */
+  debuff?: "atk" | "def";
+  /** Applied to you for the rest of the fight. */
+  buff?: "atk" | "def" | "crit";
+  /** Fraction of damage dealt that heals you. */
+  drain?: number;
+  /** Fraction of your maximum HP restored outright. */
+  heal?: number;
+  /** Usable once per fight. */
+  once?: boolean;
+  /** Size of the buff or debuff; path moves default to the role's scale. */
+  scale?: number;
+}
+
+export interface PathMove extends MoveLike {
+  /** Mirrors the trial tier whose Gate unlocks learning it. */
+  tier: TierNumber;
+  /** Stat points spent to learn it. */
+  cost: number;
+  /** Gate that must be cleared first; null for the free starting move. */
+  requiresTrial: TierNumber | null;
+  /** Extra threshold for the Tier-5 ultimate. */
+  requiresStat?: { stat: StatKey; amount: number };
+}
+
+/* ── The story game ── */
+export type GameClassId = "fighter" | "mage" | "assassin" | "ranger";
+
+export interface BasicSkill extends MoveLike {
+  /** Hunter level that unlocks the node. */
+  level: number;
+  /** Stat points spent to learn it. */
+  cost: number;
+  /** One-line flavour for the tree node. */
+  desc: string;
+  /** Free starting skill, granted the moment the class is chosen. */
+  starter?: boolean;
+}
+
+export interface HunterClass {
+  id: GameClassId;
+  name: string;
+  icon: string;
+  color: string;
+  role: string;
+  flavor: string;
+  /** The two stats this class leans on, for the tree's tooltip. */
+  stats: [StatKey, StatKey];
+  skills: readonly BasicSkill[];
+}
+
+export type EpisodeKind = "field" | "story" | "boss" | "job";
+
+export interface StoryEpisode {
+  /** The hunter level that unlocks this tile. */
+  level: number;
+  kind: EpisodeKind;
+  region: string;
+  title: string;
+  enemy: string;
+  /** Portrait art for named enemies; composed fights fall back to a silhouette. */
+  enemyArt?: string;
+  npc?: string;
+  /** The System's quest text. */
+  briefing: string;
+  /** What the encounter is, in prose. */
+  prose: string;
+  /** Gold paid on first clear; SP income is derived from `kind` in lib/story. */
+  gold: number;
+  rewardNote: string;
+}
+
 export interface MonarchPath {
   id: PathId;
+  /** Full Monarch title. Sigils, loot text and the ascension pay-off read this. */
   name: string;
+  /** The class name shown through Tiers 1–4, before ascension. */
+  monarchTitle: string;
   jobClass: string;
   flavor: string;
   signatureExercise: CameraExercise;
   icon: string;
   color: string;
+  /** Drives the Tier-5 ultimate's stat requirement, split three paths per stat. */
+  primaryStat: StatKey;
+  moves: readonly [PathMove, PathMove, PathMove, PathMove, PathMove];
   tiers: readonly [PathTier, PathTier, PathTier, PathTier, PathTier];
 }
 
@@ -96,6 +189,7 @@ export interface Settings {
   screenShake: boolean;
   floatingNumbers: boolean;
   remindersEnabled: boolean;
+  fastMode: boolean;
 }
 
 /* ════════ BLOOD PACT — real-world stakes ════════ */
@@ -133,6 +227,8 @@ export interface GameState {
   // progression
   level: number;
   pts: number;
+  /** Skill Points: earned from clearing story episodes and Gates, spent only on the skill tree. */
+  sp: number;
   streak: number;
   hp: number;
   hpMax: number;
@@ -185,9 +281,21 @@ export interface GameState {
   hudTheme: ThemeId;
   equippedFlourishId: number | null;
 
-  // Level 40 Job Change and independent, one-time camera Gates.
+  // Level 40 Job Change and independent, one-time battle Gates.
+  /** The class picked at Awakening. Drives the basic skill tree and the story. */
+  gameClass: GameClassId | null;
+  /** Class skill ids learned from the tree. */
+  basicSkills: string[];
+  /** Story tiles cleared, by level. */
+  storyCleared: number[];
   monarchPath: PathId | null;
   clearedGates: TierNumber[];
+  /** Local record of when each trial was cleared, for the Gate Log. */
+  gateClears: { tier: TierNumber; date: string }[];
+  /** Move ids learned with skill points. Clearing a Gate only unlocks the option. */
+  learnedMoves: string[];
+  /** True once the Tier-5 ultimate is learned and the ascension has played. */
+  ascended: boolean;
   shieldCharges: number;
   shieldWeek: string;
   signatureUsedDate: string;

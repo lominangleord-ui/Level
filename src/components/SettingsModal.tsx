@@ -57,6 +57,7 @@ export function SettingsModal() {
     toggleAdaptive: state.toggleAdaptive, toggleHardcore: state.toggleHardcore,
     toggleVoice: state.toggleVoice, toggleShake: state.toggleShake,
     toggleFloaters: state.toggleFloaters,
+    toggleFastMode: state.toggleFastMode,
     setRemindersEnabled: state.setRemindersEnabled,
   })));
   const fileRef = useRef<HTMLInputElement>(null);
@@ -97,6 +98,13 @@ export function SettingsModal() {
           </div>
 
           <div className="space-y-1.5">
+            <Toggle
+              on={s.settings.fastMode}
+              onClick={s.toggleFastMode}
+              label="Fast Mode"
+              desc="Low-end mode: pauses the mana canvas and removes decorative motion, blur, scan sweeps, glow-heavy transitions and screen effects. Workouts, camera counting, battles and progression still work."
+              color="var(--green)"
+            />
             <Toggle
               on={s.settings.adaptiveMode}
               onClick={s.toggleAdaptive}

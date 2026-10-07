@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useGame } from "../store/game";
 import { rankFromLevel } from "../data";
 import { RunicText } from "./common";
@@ -10,14 +10,15 @@ export function LevelUpFx() {
   const show = useGame((s) => s.levelUpFx);
   const level = useGame((s) => s.level);
   const clear = useGame((s) => s.clearLevelUpFx);
+  const fastMode = useGame((s) => s.settings.fastMode);
 
   useEffect(() => {
     if (show) {
       audio.levelUp();
-      const id = setTimeout(clear, 2000);
+      const id = setTimeout(clear, fastMode ? 300 : 2000);
       return () => clearTimeout(id);
     }
-  }, [show, clear]);
+  }, [show, clear, fastMode]);
 
   if (!show) return null;
   const particles = Array.from({ length: 44 }, (_, i) => {
@@ -51,14 +52,15 @@ export function RankUpFx() {
   const rank = useGame((s) => s.rankUpFx);
   const level = useGame((s) => s.level);
   const clear = useGame((s) => s.clearRankUpFx);
+  const fastMode = useGame((s) => s.settings.fastMode);
 
   useEffect(() => {
     if (rank) {
       audio.rankUp();
-      const id = setTimeout(clear, 3200);
+      const id = setTimeout(clear, fastMode ? 350 : 3200);
       return () => clearTimeout(id);
     }
-  }, [rank, clear]);
+  }, [rank, clear, fastMode]);
 
   if (!rank) return null;
   const { color, name } = rankFromLevel(level);
@@ -78,15 +80,90 @@ export function RankUpFx() {
   );
 }
 
+/**
+ * The Tier-5 ascension. Learning the ultimate retires the job class name and
+ * replaces it with the Monarch title everywhere, so it reuses the Awaken
+ * sequence's typed-line rhythm rather than a plain notification.
+ */
+export function AscensionFx() {
+  const show = useGame((s) => s.ascensionFx);
+  const monarchPath = useGame((s) => s.monarchPath);
+  const clear = useGame((s) => s.clearAscensionFx);
+  const fastMode = useGame((s) => s.settings.fastMode);
+  const [lines, setLines] = useState(0);
+  const path = getPath(monarchPath);
+
+  const script = path
+    ? ["The Nascent trials end here.", `You are no longer ${path.jobClass}.`, `Rise, ${path.monarchTitle}.`]
+    : [];
+
+  useEffect(() => {
+    if (!show) return;
+    setLines(fastMode ? 3 : 0);
+    if (fastMode) {
+      const quick = window.setTimeout(clear, 400);
+      return () => window.clearTimeout(quick);
+    }
+    const timers: number[] = [];
+    script.forEach((_, index) => {
+      timers.push(window.setTimeout(() => { setLines(index + 1); audio.repBeep(); }, 900 + index * 950));
+    });
+    timers.push(window.setTimeout(() => audio.levelUp(), 900 + script.length * 950));
+    timers.push(window.setTimeout(clear, 900 + script.length * 950 + 2600));
+    return () => timers.forEach(window.clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, fastMode, monarchPath]);
+
+  if (!show || !path) return null;
+
+  return (
+    <div className="gate-clear-overlay fixed inset-0 z-[78] sys-backdrop flex items-center justify-center p-5" role="dialog" aria-label="Ascension">
+      <div className="gate-portal" style={{ ["--cyan" as string]: path.color }} aria-hidden="true">
+        {[0, 1, 2, 3].map((index) => <span key={index} className="gate-ring" />)}
+      </div>
+      <div className="w-full max-w-[560px] relative z-[1]">
+        <SystemWindow title="ASCENSION" accent={path.color}>
+          <div className="text-center py-4">
+            <div className="font-kr text-[34px]" style={{ color: path.color, textShadow: `0 0 30px ${path.color}` }}>
+              <RunicText text="각성" duration={700} />
+            </div>
+            <p className="font-mono text-[9.5px] tracking-[.24em] text-[color:var(--text-dim)] mt-2">
+              TIER 5 · {PATH_TIERS[4].name.toUpperCase()} · LEVEL {PATH_TIERS[4].min}+
+            </p>
+          </div>
+          <div className="min-h-[112px] flex flex-col justify-center gap-2.5 font-mono text-[12.5px] sm:text-[14px] tracking-wider">
+            {script.slice(0, lines).map((line, index) => (
+              <div key={line} className="slide-up">
+                <span className="text-[color:var(--text-faint)]">&gt;&nbsp;</span>
+                <RunicText
+                  text={line}
+                  duration={420}
+                  className={index === script.length - 1 ? "typing-caret" : undefined}
+                  style={index === script.length - 1 ? { color: path.color } : { color: "var(--cyan-bright)" }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="win-rule" />
+          <button className="sl-btn sl-btn-solid w-full" onClick={clear}>
+            CONTINUE
+          </button>
+        </SystemWindow>
+      </div>
+    </div>
+  );
+}
+
 export function GateClearFx() {
   const scene = useGame((s) => s.gateClearFx);
   const clear = useGame((s) => s.clearGateFx);
+  const fastMode = useGame((s) => s.settings.fastMode);
 
   useEffect(() => {
     if (!scene) return;
-    const timer = window.setTimeout(clear, 3000);
+    const timer = window.setTimeout(clear, fastMode ? 400 : 3000);
     return () => window.clearTimeout(timer);
-  }, [scene, clear]);
+  }, [scene, clear, fastMode]);
 
   if (!scene) return null;
   const path = getPath(scene.path);

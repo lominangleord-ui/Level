@@ -9,6 +9,7 @@ import { Intro, Awaken } from "./components/Onboarding";
 import { StatusPanel, ProfileWindow } from "./components/StatusPanel";
 import { DailyQuest } from "./components/DailyQuest";
 import { SpecialQuestBanner } from "./components/QuestBanners";
+import { PathPreview } from "./components/PathScreen";
 import { TitlesTab } from "./components/TitlesTab";
 import { BloodPactWindow, PactLedger } from "./components/BloodPact";
 import { LogTab } from "./components/LogTab";
@@ -19,10 +20,13 @@ import { InventoryModal } from "./components/InventoryModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { AvatarPicker } from "./components/AvatarPicker";
 import { Notifications } from "./components/Notifications";
-import { GateClearFx, LevelUpFx, RankUpFx } from "./components/Fx";
+import { AscensionFx, GateClearFx, LevelUpFx, RankUpFx } from "./components/Fx";
+import { JourneyTab } from "./components/JourneyTab";
+import { SkillTreeModal } from "./components/SkillTree";
+import { StoryBattle } from "./components/StoryBattle";
 import { CameraOverlay } from "./components/CameraOverlay";
 import { JobChange } from "./components/JobChange";
-import { PathPreview, PathScreen } from "./components/PathScreen";
+import { GateBattle } from "./components/GateBattle";
 import { getPath } from "./data/monarchPaths";
 import { loadDetector } from "./lib/pose";
 import { checkDailyReminder, reconcileReminderTimestamp, syncReminderSnapshot } from "./lib/reminders";
@@ -30,7 +34,7 @@ import { REMINDER_POLL_MS } from "./lib/reminderPolicy";
 
 const TABS = [
   { id: "quest", label: "QUEST", icon: "⚔" },
-  { id: "path", label: "PATH", icon: "♛" },
+  { id: "journey", label: "JOURNEY", icon: "🗺" },
   { id: "titles", label: "TITLES", icon: "◇" },
   { id: "pact", label: "PACT", icon: "🩸" },
   { id: "log", label: "LOG", icon: "▤" },
@@ -39,6 +43,8 @@ const TABS = [
 function TopBar() {
   const openSettings = useUi((s) => s.openSettings);
   const openInventory = useUi((s) => s.openInventory);
+  const toggleSkillTree = useUi((s) => s.toggleSkillTree);
+  const skillTreeOpen = useUi((s) => s.skillTreeOpen);
   const gold = useGame((s) => s.gold);
 
   return (
@@ -51,6 +57,14 @@ function TopBar() {
       >
         ◈ <CountUp value={gold} />
       </span>
+      <button
+        className={`top-btn ${skillTreeOpen ? "active" : ""}`}
+        onClick={toggleSkillTree}
+        title="Skill Tree"
+        aria-label="Skill Tree"
+      >
+        ✦
+      </button>
       <button className="top-btn" onClick={openInventory} title="Inventory" aria-label="Inventory">
         🎒
       </button>
@@ -64,15 +78,14 @@ function TopBar() {
 function BottomNav() {
   const tab = useGame((s) => s.tab);
   const setTab = useGame((s) => s.setTab);
-  const pathChosen = useGame((s) => s.monarchPath !== null);
 
   return (
     <nav className="bottom-nav">
       <div className="flex items-stretch">
-        {TABS.filter((t) => t.id !== "path" || pathChosen).map((t) => (
+        {TABS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => setTab(t.id as typeof tab)}
             className={`nav-btn flex-1 py-3 flex flex-col items-center gap-1 ${tab === t.id ? "active" : ""}`}
           >
             <span className="text-[17px] leading-none">{t.icon}</span>
@@ -105,9 +118,6 @@ function MainApp() {
       {pactActive && <div className="pact-active-ring" />}
       <TopBar />
 
-      {/* ─────────── QUEST TAB ───────────
-          Mobile  : PROFILE → STATUS → banners → DAILY QUEST  (profile always first)
-          Desktop : left rail = PROFILE + STATUS · right rail = banners + QUEST */}
       {tab === "quest" && (
         <div className="hud-grid">
           <div className="flex flex-col gap-4">
@@ -122,7 +132,7 @@ function MainApp() {
         </div>
       )}
 
-      {tab === "path" && <div className="max-w-[860px] mx-auto"><PathScreen /></div>}
+      {tab === "journey" && <div className="max-w-[860px] mx-auto"><JourneyTab /></div>}
 
       {tab === "titles" && (
         <div className="max-w-[760px] mx-auto">
@@ -148,12 +158,12 @@ function MainApp() {
   );
 }
 
-/** Only the topmost task renders, so blurred full-screen backdrops never stack. */
 function GlobalOverlays() {
   const s = useGame(useShallow((state) => ({
     screen: state.screen,
     dead: state.dead,
     gateClearFx: state.gateClearFx,
+    ascensionFx: state.ascensionFx,
     jobChange: state.level >= 40 && !state.monarchPath && !state.inLockdown,
     levelUpFx: state.levelUpFx, rankUpFx: state.rankUpFx,
     hasNotification: state.notifications.length > 0,
@@ -161,10 +171,13 @@ function GlobalOverlays() {
   })));
   const ui = useUi(useShallow((state) => ({
     camera: state.camExercise !== null,
+    gateBattle: state.activeGateBattle !== null,
+    storyBattle: state.activeStoryLevel !== null,
     avatar: state.avatarOpen, inventory: state.inventoryOpen, settings: state.settingsOpen,
+    skillTree: state.skillTreeOpen,
   })));
-  const active = s.screen === "main" && (s.dead || s.jobChange || !!s.gateClearFx || s.levelUpFx || !!s.rankUpFx || s.hasNotification || s.hasReward
-    || ui.camera || ui.avatar || ui.inventory || ui.settings);
+  const active = s.screen === "main" && (s.dead || s.jobChange || !!s.gateClearFx || s.ascensionFx || s.levelUpFx || !!s.rankUpFx || s.hasNotification || s.hasReward
+    || ui.camera || ui.gateBattle || ui.storyBattle || ui.avatar || ui.inventory || ui.settings || ui.skillTree);
 
   useEffect(() => {
     if (!active) return;
@@ -176,12 +189,16 @@ function GlobalOverlays() {
   if (s.screen !== "main") return null;
   if (s.dead) return <Death />;
   if (ui.camera) return <CameraOverlay />;
+  if (ui.gateBattle) return <GateBattle />;
+  if (ui.storyBattle) return <StoryBattle />;
   if (s.jobChange) return <JobChange />;
   if (s.gateClearFx) return <GateClearFx />;
+  if (s.ascensionFx) return <AscensionFx />;
   if (s.levelUpFx) return <LevelUpFx />;
   if (s.rankUpFx) return <RankUpFx />;
   if (s.hasNotification) return <Notifications />;
   if (s.hasReward) return <RewardModal />;
+  if (ui.skillTree) return <SkillTreeModal />;
   if (ui.avatar) return <AvatarPicker />;
   if (ui.settings) return <SettingsModal />;
   if (ui.inventory) return <InventoryModal />;
@@ -195,19 +212,21 @@ export default function App() {
   const equippedFlourishId = useGame((s) => s.equippedFlourishId);
   const inLockdown = useGame((s) => s.inLockdown);
   const dead = useGame((s) => s.dead);
-  const gameOverlay = useGame((s) => s.dead || (s.level >= 40 && !s.monarchPath && !s.inLockdown) || !!s.gateClearFx || s.levelUpFx || !!s.rankUpFx
+  const fastMode = useGame((s) => s.settings.fastMode);
+  const gameOverlay = useGame((s) => s.dead || (s.level >= 40 && !s.monarchPath && !s.inLockdown) || !!s.gateClearFx || s.ascensionFx || s.levelUpFx || !!s.rankUpFx
     || s.notifications.length > 0 || (s.rewardChoicePending && !s.inLockdown));
-  const uiOverlay = useUi((s) => s.camExercise !== null || s.inventoryOpen || s.settingsOpen || s.avatarOpen);
+  const uiOverlay = useUi((s) => s.camExercise !== null || s.activeGateBattle !== null || s.activeStoryLevel !== null || s.inventoryOpen || s.settingsOpen || s.avatarOpen || s.skillTreeOpen);
 
   useEffect(() => {
     if (dead || screen === "intro") {
       useUi.getState().closeCamera();
+      useUi.getState().closeGateBattle();
       useUi.getState().closeAll();
     }
   }, [dead, screen]);
 
   useEffect(() => {
-    if (screen !== "main") return;
+    if (screen !== "main" || fastMode) return;
     const warm = () => { if (!document.hidden) void loadDetector().catch(() => undefined); };
     if ("requestIdleCallback" in window) {
       const idle = window.requestIdleCallback(warm, { timeout: 4000 });
@@ -215,7 +234,7 @@ export default function App() {
     }
     const timer = setTimeout(warm, 1500);
     return () => clearTimeout(timer);
-  }, [screen]);
+  }, [screen, fastMode]);
 
   useEffect(() => {
     const classes = document.documentElement.classList;
@@ -226,9 +245,10 @@ export default function App() {
     const path = getPath(monarchPath);
     classes.toggle("job-changed", !!path && !inLockdown);
     classes.toggle("sigil-active", !!path && equippedFlourishId !== null && !inLockdown);
+    classes.toggle("fast-mode", fastMode);
     if (path) document.documentElement.style.setProperty("--path-accent", path.color);
     else document.documentElement.style.removeProperty("--path-accent");
-  }, [hudTheme, inLockdown, monarchPath, equippedFlourishId]);
+  }, [hudTheme, inLockdown, monarchPath, equippedFlourishId, fastMode]);
 
   useEffect(() => {
     if (screen !== "main") return;
@@ -304,7 +324,7 @@ export default function App() {
 
   return (
     <>
-      <Starfield paused={gameOverlay || uiOverlay} />
+      {!fastMode && <Starfield paused={gameOverlay || uiOverlay} />}
       {screen === "intro" && <Intro />}
       {screen === "awaken" && <Awaken />}
       {screen === "main" && <MainApp />}
